@@ -43,12 +43,18 @@ jobs:
         run: rustup toolchain install 1.94.1 --profile minimal --component clippy --component rustfmt
       - name: Check formatting
         run: cargo fmt --all --check
+      - name: Check installer syntax and lint
+        run: |
+          sh -n scripts/install.sh scripts/test-install.sh
+          shellcheck scripts/install.sh scripts/test-install.sh
       - name: Lint
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --exclude zag-lens-plugin
       - name: Test plugin host-side logic
         run: cargo test --locked -p zag-lens-plugin --bin zag_lens_plugin
+      - name: Test installer script
+        run: sh scripts/test-install.sh
 
   native:
     name: Native ${{ matrix.target }}

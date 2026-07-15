@@ -1,5 +1,7 @@
 # Zag Lens
 
+![Example](screenshots/tab_bar_example.png)
+
 Zag Lens is a background Zellij plugin that reports Codex and Claude Code agent
 state in tab titles and notifies the user when an agent needs interaction. It
 uses lifecycle hooks and a versioned JSON protocol; it does not scrape terminal
@@ -8,7 +10,54 @@ contents or agent transcripts.
 This repository contains the Rust host executable, Zellij WASM plugin, adapters,
 installer, notification backends, and deterministic test fixtures.
 
-## Prerequisites
+## Quick Start
+
+Prebuilt releases support macOS and Linux on Intel and ARM. Installing one does
+not require Rust or a source checkout. You need Zellij, `curl`, `tar`, and at
+least one supported agent harness.
+
+Review the
+[installer script](https://github.com/VAlux/zag-lens/blob/main/scripts/install.sh),
+then run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/VAlux/zag-lens/main/scripts/install.sh | sh
+```
+
+The script detects the host platform, downloads the native binary and WASM
+plugin from the [latest release](https://github.com/VAlux/zag-lens/releases/latest),
+verifies both against `SHA256SUMS`, and runs the user-level installer.
+
+By default, setup configures Zellij, Codex, and Claude Code while preserving
+unrelated configuration. Then restart Zellij, approve the requested
+application-state permissions, and inspect and trust the Zag Lens commands in
+Codex with `/hooks`. Claude Code does not require a separate hook-trust step.
+
+The installer places the host executable and WASM plugin in user-level XDG or
+`~/.local` directories. Confirm the result with:
+
+```sh
+~/.local/bin/zag-lens doctor
+```
+
+## Tab Statuses
+
+By default, Zag Lens prefixes the tab's existing title with the highest-priority
+visible agent status:
+
+| State               | Icon | Example          | Meaning                                        |
+| ------------------- | ---- | ---------------- | ---------------------------------------------- |
+| `working`           | `●`  | `● api-refactor` | The agent is processing a turn or using tools. |
+| `waiting_for_user`  | `?`  | `? migrations`   | The agent needs user interaction.              |
+| `succeeded`         | `✓`  | `✓ tests`        | The most recent turn completed successfully.   |
+| `failed`            | `×`  | `× deploy`       | The most recent turn or session failed.        |
+| `stale`             | `!`  | `! review`       | Activity stopped without a terminal event.     |
+| `ready` / `stopped` | none | `project`        | No active status is displayed.                 |
+
+Icons and the title format are configurable; see
+[configuration](docs/configuration.md).
+
+## Source-build Prerequisites
 
 - Rust 1.94.1 managed by `rustup`
 - the `rustfmt` and `clippy` components
@@ -19,7 +68,7 @@ installer, notification backends, and deterministic test fixtures.
 The checked-in `rust-toolchain.toml` selects the required Rust components and
 target automatically.
 
-## Build and Install
+## Build and Install from Source
 
 Build the native executable and WASM plugin:
 
@@ -50,6 +99,9 @@ permissions, and uninstall instructions.
 
 ```sh
 cargo fmt --all --check
+sh -n scripts/install.sh scripts/test-install.sh
+shellcheck scripts/install.sh scripts/test-install.sh
+sh scripts/test-install.sh
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --exclude zag-lens-plugin
 cargo test -p zag-lens-plugin --bin zag_lens_plugin
@@ -85,19 +137,9 @@ archives and one portable Zellij plugin:
 - `x86_64-apple-darwin` and `aarch64-apple-darwin`
 - `zag-lens-plugin-<version>.wasm`
 
-Each release includes `SHA256SUMS`. Verify downloads before installation:
-
-```sh
-sha256sum --check SHA256SUMS  # Linux
-shasum -a 256 --check SHA256SUMS  # macOS
-```
-
-Extract the archive for the current platform, then pass the separately
-downloaded WASM asset when configuring Zellij:
-
-```sh
-./zag-lens setup --plugin-wasm ./zag-lens-plugin-0.1.0.wasm
-```
+Each release includes `SHA256SUMS`. The installer script filters that manifest
+to the native archive and WASM asset for the current platform and verifies both
+before installation.
 
 The release workflow rejects a tag whose version does not exactly match the
 workspace version in `Cargo.toml`.
