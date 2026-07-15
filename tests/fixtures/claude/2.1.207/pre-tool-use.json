@@ -1,0 +1,11 @@
+{
+  "session_id": "session-8",
+  "transcript_path": "/workspace/REDACTED/transcript.jsonl",
+  "cwd": "/workspace/project",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "REDACTED"
+  },
+  "tool_use_id": "toolu_fixture_1"
+}

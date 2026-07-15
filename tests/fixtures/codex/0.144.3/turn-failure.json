@@ -1,0 +1,7 @@
+{
+  "session_id": "session-7",
+  "cwd": "/workspace/project",
+  "hook_event_name": "TurnFailure",
+  "turn_id": "turn-12",
+  "failure": "REDACTED"
+}

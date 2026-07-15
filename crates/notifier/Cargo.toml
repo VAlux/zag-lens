@@ -1,0 +1,13 @@
+[package]
+name = "zag-lens-notifier"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+notify-rust = "4.18.0"
+
+[lints]
+workspace = true

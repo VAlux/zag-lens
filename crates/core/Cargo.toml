@@ -1,0 +1,15 @@
+[package]
+name = "zag-lens-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2.0"
+time = { version = "0.3", features = ["parsing"] }
+zag-lens-protocol = { path = "../protocol" }

@@ -1,0 +1,9 @@
+{
+  "session_id": "session-8",
+  "transcript_path": "/workspace/REDACTED/transcript.jsonl",
+  "cwd": "/workspace/project",
+  "hook_event_name": "StopFailure",
+  "error": "rate_limit",
+  "error_details": "REDACTED",
+  "last_assistant_message": "REDACTED"
+}

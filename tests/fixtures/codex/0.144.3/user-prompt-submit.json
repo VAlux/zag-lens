@@ -1,0 +1,8 @@
+{
+  "session_id": "session-7",
+  "transcript_path": "/tmp/REDACTED.jsonl",
+  "cwd": "/workspace/project",
+  "hook_event_name": "UserPromptSubmit",
+  "turn_id": "turn-12",
+  "prompt": "REDACTED"
+}

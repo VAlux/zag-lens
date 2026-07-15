@@ -1,0 +1,9 @@
+{
+  "session_id": "session-8",
+  "transcript_path": "/workspace/REDACTED/transcript.jsonl",
+  "cwd": "/workspace/project",
+  "hook_event_name": "Notification",
+  "message": "REDACTED",
+  "title": "REDACTED",
+  "notification_type": "permission_prompt"
+}

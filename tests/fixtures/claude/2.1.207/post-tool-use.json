@@ -1,0 +1,14 @@
+{
+  "session_id": "session-8",
+  "transcript_path": "/workspace/REDACTED/transcript.jsonl",
+  "cwd": "/workspace/project",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "REDACTED"
+  },
+  "tool_response": {
+    "result": "REDACTED"
+  },
+  "tool_use_id": "toolu_fixture_2"
+}

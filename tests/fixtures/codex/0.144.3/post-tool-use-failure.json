@@ -1,0 +1,15 @@
+{
+  "session_id": "session-7",
+  "cwd": "/workspace/project",
+  "hook_event_name": "PostToolUse",
+  "turn_id": "turn-12",
+  "tool_name": "Bash",
+  "tool_use_id": "tool-3",
+  "tool_input": {
+    "command": "REDACTED"
+  },
+  "tool_response": {
+    "exit_code": 1,
+    "output": "REDACTED"
+  }
+}

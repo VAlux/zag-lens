@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate release tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Match tag to workspace version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          workspace_version="$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+          if [[ -z "${version}" || "${version}" != "${workspace_version}" ]]; then
+            echo "tag ${GITHUB_REF_NAME} does not match workspace version ${workspace_version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  verify:
+    name: Verify tag contents
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust checks
+        run: rustup toolchain install 1.94.1 --profile minimal --component clippy --component rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace --exclude zag-lens-plugin
+      - name: Test plugin host-side logic
+        run: cargo test --locked -p zag-lens-plugin --lib
+
+  native:
+    name: Native ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust target
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal
+          rustup target add --toolchain 1.94.1 ${{ matrix.target }}
+      - name: Build native executable
+        run: cargo build --locked --release -p zag-lens --target ${{ matrix.target }}
+      - name: Package native archive
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          archive="zag-lens-${VERSION}-${TARGET}"
+          mkdir -p "dist/${archive}"
+          install -m 755 "target/${TARGET}/release/zag-lens" "dist/${archive}/zag-lens"
+          cp README.md LICENSE-MIT LICENSE-APACHE "dist/${archive}/"
+          cp -R docs "dist/${archive}/docs"
+          tar -C dist -czf "dist/${archive}.tar.gz" "${archive}"
+          rm -rf "dist/${archive}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  plugin:
+    name: WASI plugin
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust and WASI target
+        run: rustup toolchain install 1.94.1 --profile minimal --target wasm32-wasip1
+      - name: Build Zellij plugin
+        run: cargo build --locked --release -p zag-lens-plugin --target wasm32-wasip1
+      - name: Name plugin asset
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          mkdir -p dist
+          cp target/wasm32-wasip1/release/zag_lens_plugin.wasm \
+            "dist/zag-lens-plugin-${VERSION}.wasm"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasi-plugin
+          path: dist/*.wasm
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: [prepare, verify, native, plugin]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasi-plugin
+          path: dist
+      - name: Generate SHA-256 checksums
+        working-directory: dist
+        run: sha256sum zag-lens-* > SHA256SUMS
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/* --clobber
+          else
+            gh release create "${TAG}" dist/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Zag Lens ${TAG}"
+          fi

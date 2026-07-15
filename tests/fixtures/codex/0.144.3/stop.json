@@ -1,0 +1,9 @@
+{
+  "session_id": "session-7",
+  "transcript_path": "/tmp/REDACTED.jsonl",
+  "cwd": "/workspace/project",
+  "hook_event_name": "Stop",
+  "turn_id": "turn-12",
+  "stop_hook_active": false,
+  "last_assistant_message": "REDACTED"
+}

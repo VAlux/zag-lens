@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "01J2Z3Y4X5W6V7T8S9R0Q1P2N3",
+  "occurred_at": "2026-07-13T12:00:00.000Z",
+  "harness": "claude",
+  "native_event": "PermissionRequest",
+  "kind": "interaction_required",
+  "state": "waiting_for_user",
+  "session_id": "session-7",
+  "agent_instance_id": "subagent-2",
+  "turn_id": "turn-4",
+  "pane_id": "terminal_3",
+  "zellij_session": "work",
+  "cwd": "/workspace/project",
+  "attention": {
+    "kind": "permission",
+    "summary": "Permission required"
+  },
+  "adapter": {
+    "name": "claude",
+    "version": 1
+  },
+  "future_metadata": {
+    "parent_agent_instance_id": "session-7"
+  }
+}
