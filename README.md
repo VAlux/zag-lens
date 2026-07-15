@@ -1,5 +1,7 @@
 # Zag Lens
 
+[![Release](https://github.com/VAlux/zag-lens/actions/workflows/release.yml/badge.svg)](https://github.com/VAlux/zag-lens/actions/workflows/release.yml)
+
 ![Example](screenshots/tab_bar_example.png)
 
 Zag Lens is a background Zellij plugin that reports Codex and Claude Code agent
