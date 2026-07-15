@@ -3248,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "zag-lens"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap 4.6.1",
  "serde_json",
@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "zag-lens-claude-adapter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "zag-lens-protocol",
@@ -3272,7 +3272,7 @@ dependencies = [
 
 [[package]]
 name = "zag-lens-codex-adapter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "zag-lens-protocol",
@@ -3280,7 +3280,7 @@ dependencies = [
 
 [[package]]
 name = "zag-lens-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror 2.0.18",
  "time",
@@ -3289,7 +3289,7 @@ dependencies = [
 
 [[package]]
 name = "zag-lens-installer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "kdl",
  "serde",
@@ -3299,14 +3299,14 @@ dependencies = [
 
 [[package]]
 name = "zag-lens-notifier"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "notify-rust",
 ]
 
 [[package]]
 name = "zag-lens-plugin"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "time",
@@ -3317,7 +3317,7 @@ dependencies = [
 
 [[package]]
 name = "zag-lens-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
