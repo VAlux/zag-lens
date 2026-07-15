@@ -18,7 +18,7 @@ Run the same baseline checks used by CI, plus native plugin unit tests:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --exclude zag-lens-plugin
-cargo test -p zag-lens-plugin --lib
+cargo test -p zag-lens-plugin --bin zag_lens_plugin
 cargo check -p zag-lens-plugin --target wasm32-wasip1
 ```
 

@@ -48,7 +48,7 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --exclude zag-lens-plugin
       - name: Test plugin host-side logic
-        run: cargo test --locked -p zag-lens-plugin --lib
+        run: cargo test --locked -p zag-lens-plugin --bin zag_lens_plugin
 
   native:
     name: Native ${{ matrix.target }}

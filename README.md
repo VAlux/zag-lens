@@ -52,7 +52,7 @@ permissions, and uninstall instructions.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --exclude zag-lens-plugin
-cargo test -p zag-lens-plugin --lib
+cargo test -p zag-lens-plugin --bin zag_lens_plugin
 cargo check -p zag-lens-plugin --target wasm32-wasip1
 cargo build -p zag-lens-plugin --release --target wasm32-wasip1
 ```
