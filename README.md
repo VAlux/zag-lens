@@ -40,6 +40,19 @@ The installer places the host executable and WASM plugin in user-level XDG or
 ~/.local/bin/zag-lens doctor
 ```
 
+## Updating
+
+Rerun the installer to download and install the latest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/VAlux/zag-lens/main/scripts/install.sh | sh
+```
+
+The installer atomically replaces the native executable and WASM plugin while
+preserving existing configuration and hooks. Setup is idempotent, so rerunning
+it when Zag Lens is already current leaves the configuration unchanged. Restart
+Zellij afterward to load the updated plugin.
+
 ## Tab Statuses
 
 By default, Zag Lens prefixes the tab's existing title with the highest-priority
