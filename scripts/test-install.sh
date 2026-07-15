@@ -4,7 +4,7 @@
 
 set -eu
 
-script_directory="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+script_directory="$(CDPATH='' cd "$(dirname "$0")" && pwd)"
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/zag-lens-install-test.XXXXXX")"
 mock_bin="${test_directory}/bin"
 installer_log="${test_directory}/installer-arguments"
