@@ -9,6 +9,7 @@ use crate::model::{
     ApplyReport, Component, Conflict, FileChange, InstallError, InstallPlan, Notice, Operation,
     PlanContext, Selection,
 };
+use crate::opencode::{self, OpenCodeOwnership};
 use crate::paths::InstallPaths;
 use crate::zellij::{self, ZellijOwnership};
 
@@ -22,11 +23,16 @@ struct ManifestComponents {
     codex: Option<HookOwnership>,
     #[serde(skip_serializing_if = "Option::is_none")]
     claude: Option<HookOwnership>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    opencode: Option<OpenCodeOwnership>,
 }
 
 impl ManifestComponents {
     fn is_empty(&self) -> bool {
-        self.zellij.is_none() && self.codex.is_none() && self.claude.is_none()
+        self.zellij.is_none()
+            && self.codex.is_none()
+            && self.claude.is_none()
+            && self.opencode.is_none()
     }
 }
 
@@ -183,6 +189,37 @@ impl Installer {
             }
         }
 
+        if selection.contains(Component::OpenCode) {
+            let current = read_optional(&self.paths.opencode_plugin)?;
+            match opencode::setup(
+                current.as_deref(),
+                &self.paths.opencode_plugin,
+                &self.paths.binary,
+                manifest.components.opencode.as_ref(),
+            ) {
+                Ok(setup) => {
+                    if setup.changed {
+                        changes.push(write_change(
+                            Component::OpenCode,
+                            self.paths.opencode_plugin.clone(),
+                            current,
+                            setup.bytes,
+                            context,
+                            "install the fail-open OpenCode lifecycle plugin",
+                        ));
+                    }
+                    manifest.components.opencode = Some(setup.ownership);
+                    notices.push(Notice {
+                        component: Component::OpenCode,
+                        message: "Restart OpenCode to load the Zag Lens lifecycle plugin."
+                            .to_owned(),
+                    });
+                }
+                Err(InstallError::Conflicts(mut found)) => conflicts.append(&mut found),
+                Err(error) => return Err(error),
+            }
+        }
+
         if !conflicts.is_empty() {
             return Err(InstallError::Conflicts(conflicts));
         }
@@ -211,6 +248,7 @@ impl Installer {
     ///
     /// Returns an error for unreadable or invalid configuration, unsupported
     /// manifests, or externally modified entries recorded as installer-owned.
+    #[allow(clippy::too_many_lines)]
     pub fn plan_uninstall(
         &self,
         selection: &Selection,
@@ -280,6 +318,30 @@ impl Installer {
             && !has_component_conflict(&conflicts, Component::Claude)
         {
             manifest.components.claude = None;
+        }
+
+        if selection.contains(Component::OpenCode)
+            && let Some(ownership) = manifest.components.opencode.as_ref()
+        {
+            let current = read_optional(&self.paths.opencode_plugin)?;
+            match opencode::uninstall(current.as_deref(), &self.paths.opencode_plugin, ownership) {
+                Ok(uninstall) => {
+                    if uninstall.changed {
+                        changes.push(FileChange {
+                            component: Some(Component::OpenCode),
+                            path: self.paths.opencode_plugin.clone(),
+                            operation: Operation::Remove,
+                            backup_path: None,
+                            description: "remove the owned OpenCode lifecycle plugin".to_owned(),
+                            original: current,
+                            replacement: None,
+                        });
+                    }
+                    manifest.components.opencode = None;
+                }
+                Err(InstallError::Conflicts(mut found)) => conflicts.append(&mut found),
+                Err(error) => return Err(error),
+            }
         }
 
         if !conflicts.is_empty() {
@@ -636,6 +698,139 @@ mod tests {
             .plan_setup(&Selection::all(), &context)
             .expect("second setup plan");
         assert!(second.is_empty());
+    }
+
+    #[test]
+    fn default_setup_installs_dependency_free_opencode_plugin() {
+        let (_temporary, installer, context) = fixture();
+        installer
+            .plan_setup(&Selection::all(), &context)
+            .expect("setup plan")
+            .apply(false)
+            .expect("setup applies");
+
+        let plugin =
+            fs::read_to_string(&installer.paths().opencode_plugin).expect("read OpenCode plugin");
+        assert!(plugin.contains("Bun.spawn("));
+        assert!(plugin.contains("--harness\", \"opencode"));
+        assert!(plugin.contains(&installer.paths().binary.to_string_lossy().to_string()));
+        assert!(!plugin.contains("JSON.stringify(event)"));
+    }
+
+    #[test]
+    fn opencode_uninstall_removes_only_the_owned_plugin() {
+        let (_temporary, installer, context) = fixture();
+        let selection = Selection::from_components([Component::OpenCode]);
+        installer
+            .plan_setup(&selection, &context)
+            .expect("setup plan")
+            .apply(false)
+            .expect("setup applies");
+        assert!(installer.paths().opencode_plugin.exists());
+
+        installer
+            .plan_uninstall(&selection, &context)
+            .expect("uninstall plan")
+            .apply(false)
+            .expect("uninstall applies");
+        assert!(!installer.paths().opencode_plugin.exists());
+        assert!(!installer.paths().manifest.exists());
+    }
+
+    #[test]
+    fn matching_preexisting_opencode_plugin_is_preserved() {
+        let (_temporary, installer, context) = fixture();
+        let selection = Selection::from_components([Component::OpenCode]);
+        let first = installer
+            .plan_setup(&selection, &context)
+            .expect("initial setup plan");
+        let plugin = first
+            .changes()
+            .iter()
+            .find(|change| change.path == installer.paths().opencode_plugin)
+            .and_then(|change| change.replacement.clone())
+            .expect("generated plugin bytes");
+        fs::create_dir_all(
+            installer
+                .paths()
+                .opencode_plugin
+                .parent()
+                .expect("plugin parent"),
+        )
+        .expect("create plugin parent");
+        fs::write(&installer.paths().opencode_plugin, &plugin).expect("seed plugin");
+
+        installer
+            .plan_setup(&selection, &context)
+            .expect("adopt matching plugin")
+            .apply(false)
+            .expect("setup applies");
+        installer
+            .plan_uninstall(&selection, &context)
+            .expect("uninstall plan")
+            .apply(false)
+            .expect("uninstall applies");
+
+        assert_eq!(
+            fs::read(&installer.paths().opencode_plugin).expect("preexisting plugin remains"),
+            plugin
+        );
+    }
+
+    #[test]
+    fn modified_owned_opencode_plugin_is_a_conflict() {
+        let (_temporary, installer, context) = fixture();
+        let selection = Selection::from_components([Component::OpenCode]);
+        installer
+            .plan_setup(&selection, &context)
+            .expect("setup plan")
+            .apply(false)
+            .expect("setup applies");
+        fs::write(&installer.paths().opencode_plugin, "// user modification\n")
+            .expect("modify plugin");
+
+        assert!(matches!(
+            installer.plan_setup(&selection, &context),
+            Err(InstallError::Conflicts(conflicts))
+                if conflicts.iter().any(|conflict| conflict.component == Component::OpenCode)
+        ));
+        assert!(matches!(
+            installer.plan_uninstall(&selection, &context),
+            Err(InstallError::Conflicts(conflicts))
+                if conflicts.iter().any(|conflict| conflict.component == Component::OpenCode)
+        ));
+    }
+
+    #[test]
+    fn version_one_manifest_without_opencode_remains_readable() {
+        let (_temporary, installer, context) = fixture();
+        fs::create_dir_all(
+            installer
+                .paths()
+                .manifest
+                .parent()
+                .expect("manifest parent"),
+        )
+        .expect("create manifest parent");
+        fs::write(
+            &installer.paths().manifest,
+            br#"{
+  "schema_version": 1,
+  "installed_at": "2026-07-13T12:00:00Z",
+  "components": {}
+}
+"#,
+        )
+        .expect("seed old manifest");
+
+        let plan = installer
+            .plan_setup(&Selection::from_components([Component::OpenCode]), &context)
+            .expect("old manifest parses");
+        assert!(
+            plan.changes()
+                .iter()
+                .any(|change| change.path == installer.paths().opencode_plugin)
+        );
     }
 
     #[test]

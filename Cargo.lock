@@ -3259,6 +3259,7 @@ dependencies = [
  "zag-lens-codex-adapter",
  "zag-lens-installer",
  "zag-lens-notifier",
+ "zag-lens-opencode-adapter",
  "zag-lens-protocol",
 ]
 
@@ -3302,6 +3303,14 @@ name = "zag-lens-notifier"
 version = "0.1.1"
 dependencies = [
  "notify-rust",
+]
+
+[[package]]
+name = "zag-lens-opencode-adapter"
+version = "0.1.1"
+dependencies = [
+ "serde_json",
+ "zag-lens-protocol",
 ]
 
 [[package]]

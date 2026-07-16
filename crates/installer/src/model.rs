@@ -9,6 +9,7 @@ pub enum Component {
     Zellij,
     Codex,
     Claude,
+    OpenCode,
 }
 
 /// Components affected by setup or uninstall.
@@ -20,7 +21,12 @@ pub struct Selection {
 impl Selection {
     #[must_use]
     pub fn all() -> Self {
-        Self::from_components([Component::Zellij, Component::Codex, Component::Claude])
+        Self::from_components([
+            Component::Zellij,
+            Component::Codex,
+            Component::Claude,
+            Component::OpenCode,
+        ])
     }
 
     #[must_use]

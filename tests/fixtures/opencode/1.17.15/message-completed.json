@@ -1,0 +1,7 @@
+{
+  "event_type": "message.updated",
+  "session_id": "ses_local_7",
+  "turn_id": "msg_assistant_9",
+  "completed": true,
+  "has_error": false
+}

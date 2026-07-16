@@ -92,6 +92,6 @@ say "installing user-level files and configuration"
     "$@"
 
 say "installed Zag Lens ${version}"
-say "Codex and Claude Code integrations are configured by default"
-say "restart Zellij and approve the requested permissions"
+say "Codex, Claude Code, and OpenCode integrations are configured by default"
+say "restart Zellij and OpenCode, then approve the requested Zellij permissions"
 say "Codex users: inspect and trust the Zag Lens commands with /hooks"

@@ -51,6 +51,7 @@ pub struct InstallPaths {
     pub zellij_config: PathBuf,
     pub codex_hooks: PathBuf,
     pub claude_settings: PathBuf,
+    pub opencode_plugin: PathBuf,
     pub manifest: PathBuf,
 }
 
@@ -85,6 +86,7 @@ impl InstallPaths {
             zellij_config: config_home.join("zellij/config.kdl"),
             codex_hooks: codex_home.join("hooks.json"),
             claude_settings: claude_home.join("settings.json"),
+            opencode_plugin: config_home.join("opencode/plugins/zag-lens.js"),
             manifest: data_dir.join("install-manifest.json"),
         }
     }
@@ -132,6 +134,10 @@ mod tests {
             paths.claude_settings,
             Path::new("/home/tester/.claude/settings.json")
         );
+        assert_eq!(
+            paths.opencode_plugin,
+            Path::new("/home/tester/.config/opencode/plugins/zag-lens.js")
+        );
     }
 
     #[test]
@@ -155,6 +161,10 @@ mod tests {
         assert_eq!(
             paths.claude_settings,
             Path::new("/agents/claude/settings.json")
+        );
+        assert_eq!(
+            paths.opencode_plugin,
+            Path::new("/xdg/config/opencode/plugins/zag-lens.js")
         );
     }
 }

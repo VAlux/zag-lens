@@ -6,7 +6,7 @@ use std::fmt;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 
 /// Maximum number of Unicode scalar values retained in a notification title.
 pub const MAX_TITLE_CHARS: usize = 128;
@@ -14,7 +14,12 @@ pub const MAX_TITLE_CHARS: usize = 128;
 /// Maximum number of Unicode scalar values retained in a notification body.
 pub const MAX_BODY_CHARS: usize = 512;
 
+#[cfg(target_os = "linux")]
 const APP_NAME: &str = "Zag Lens";
+const APPLESCRIPT_PROGRAM: &str = "/usr/bin/osascript";
+const APPLESCRIPT_SOURCE: &str = r"on run argv
+    display notification (item 2 of argv) with title (item 1 of argv)
+end run";
 
 /// Notification text after privacy-preserving terminal sanitization.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,10 +71,17 @@ pub enum NotificationError {
     Desktop(String),
     /// The configured notification command could not be spawned.
     Spawn {
-        /// The trusted, user-configured executable.
+        /// The trusted executable.
         program: PathBuf,
         /// The operating-system error returned by `spawn`.
         source: io::Error,
+    },
+    /// A notification command exited unsuccessfully.
+    CommandFailed {
+        /// The trusted executable.
+        program: PathBuf,
+        /// The exit status returned by the executable.
+        status: ExitStatus,
     },
 }
 
@@ -78,13 +90,20 @@ impl fmt::Display for NotificationError {
         match self {
             Self::EmptyCommand => formatter.write_str("notification command is empty"),
             Self::UnsupportedPlatform => {
-                formatter.write_str("automatic notifications are unsupported on this platform")
+                formatter.write_str("notification backend is unsupported on this platform")
             }
             Self::Desktop(message) => write!(formatter, "desktop notification failed: {message}"),
             Self::Spawn { program, source } => {
                 write!(
                     formatter,
                     "failed to spawn notification command {}: {source}",
+                    program.display()
+                )
+            }
+            Self::CommandFailed { program, status } => {
+                write!(
+                    formatter,
+                    "notification command {} exited with {status}",
                     program.display()
                 )
             }
@@ -96,7 +115,10 @@ impl Error for NotificationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Spawn { source, .. } => Some(source),
-            Self::EmptyCommand | Self::UnsupportedPlatform | Self::Desktop(_) => None,
+            Self::EmptyCommand
+            | Self::UnsupportedPlatform
+            | Self::Desktop(_)
+            | Self::CommandFailed { .. } => None,
         }
     }
 }
@@ -138,6 +160,8 @@ pub fn deliver(notifier: &dyn Notifier, notification: &Notification) -> Delivery
 pub enum BackendConfig {
     /// Select the native backend for the current operating system.
     Auto,
+    /// Use the built-in argv-safe macOS `AppleScript` backend.
+    AppleScript,
     /// Spawn a trusted executable with an argv prefix.
     Command(CommandConfig),
     /// Emit a best-effort terminal bell.
@@ -156,6 +180,7 @@ impl BackendConfig {
     pub fn build(self) -> Result<Box<dyn Notifier>, NotificationError> {
         match self {
             Self::Auto => Ok(Box::new(AutoNotifier)),
+            Self::AppleScript => Ok(Box::new(AppleScriptNotifier)),
             Self::Command(config) => Ok(Box::new(CommandNotifier::new(config)?)),
             Self::Bell => Ok(Box::new(BellNotifier)),
             Self::Off => Ok(Box::new(OffNotifier)),
@@ -204,6 +229,17 @@ pub struct AutoNotifier;
 impl Notifier for AutoNotifier {
     fn notify(&self, notification: &Notification) -> Result<Delivery, NotificationError> {
         show_desktop_notification(notification)?;
+        Ok(Delivery::Submitted)
+    }
+}
+
+/// Built-in macOS notification backend using `/usr/bin/osascript` directly.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AppleScriptNotifier;
+
+impl Notifier for AppleScriptNotifier {
+    fn notify(&self, notification: &Notification) -> Result<Delivery, NotificationError> {
+        show_applescript_notification(notification)?;
         Ok(Delivery::Submitted)
     }
 }
@@ -368,7 +404,7 @@ where
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn show_desktop_notification(notification: &Notification) -> Result<(), NotificationError> {
     notify_rust::Notification::new()
         .appname(APP_NAME)
@@ -379,8 +415,49 @@ fn show_desktop_notification(notification: &Notification) -> Result<(), Notifica
         .map_err(|error| NotificationError::Desktop(error.to_string()))
 }
 
+#[cfg(target_os = "macos")]
+fn show_desktop_notification(notification: &Notification) -> Result<(), NotificationError> {
+    show_applescript_notification(notification)
+}
+
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn show_desktop_notification(_notification: &Notification) -> Result<(), NotificationError> {
+    Err(NotificationError::UnsupportedPlatform)
+}
+
+fn applescript_command(notification: &Notification) -> Command {
+    let mut command = Command::new(APPLESCRIPT_PROGRAM);
+    command
+        .arg("-e")
+        .arg(APPLESCRIPT_SOURCE)
+        .arg(notification.title())
+        .arg(notification.body())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+#[cfg(target_os = "macos")]
+fn show_applescript_notification(notification: &Notification) -> Result<(), NotificationError> {
+    let status = applescript_command(notification)
+        .status()
+        .map_err(|source| NotificationError::Spawn {
+            program: PathBuf::from(APPLESCRIPT_PROGRAM),
+            source,
+        })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(NotificationError::CommandFailed {
+            program: PathBuf::from(APPLESCRIPT_PROGRAM),
+            status,
+        })
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_applescript_notification(_notification: &Notification) -> Result<(), NotificationError> {
     Err(NotificationError::UnsupportedPlatform)
 }
 
@@ -451,6 +528,27 @@ mod tests {
                 OsStr::new("critical"),
                 OsStr::new("$(touch /tmp/nope)"),
                 OsStr::new("hello; exit 1"),
+            ]
+        );
+    }
+
+    #[test]
+    fn applescript_backend_keeps_fields_out_of_script_source() {
+        let notification = Notification::new(
+            "title \"quoted\"; do shell script \"false\"",
+            "body $(touch /tmp/nope)",
+        );
+        let command = applescript_command(&notification);
+        let args: Vec<&OsStr> = command.get_args().collect();
+
+        assert_eq!(command.get_program(), OsStr::new(APPLESCRIPT_PROGRAM));
+        assert_eq!(
+            args,
+            [
+                OsStr::new("-e"),
+                OsStr::new(APPLESCRIPT_SOURCE),
+                OsStr::new("title \"quoted\"; do shell script \"false\""),
+                OsStr::new("body $(touch /tmp/nope)"),
             ]
         );
     }
@@ -541,6 +639,7 @@ mod tests {
     fn all_backend_variants_build_without_delivery() {
         let configurations = [
             BackendConfig::Auto,
+            BackendConfig::AppleScript,
             BackendConfig::Bell,
             BackendConfig::Off,
             BackendConfig::Command(CommandConfig::new("/usr/bin/notifier", ["--prefix"])),

@@ -1,6 +1,6 @@
 use zag_lens_protocol::{
-    CanonicalState, EventKind, MAX_PAYLOAD_BYTES, NormalizedEvent, ProtocolError, SCHEMA_VERSION,
-    ValidationError,
+    CanonicalState, EventKind, MAX_PAYLOAD_BYTES, MINIMUM_SCHEMA_VERSION, NormalizedEvent,
+    ProtocolError, SCHEMA_VERSION, ValidationError,
 };
 
 const VALID: &[u8] = include_bytes!("../../../tests/fixtures/protocol/valid.json");
@@ -13,7 +13,7 @@ const MALFORMED: &[u8] = include_bytes!("../../../tests/fixtures/protocol/malfor
 fn valid_event_accepts_unknown_fields() {
     let event = NormalizedEvent::from_json_slice(VALID).expect("fixture must be valid");
 
-    assert_eq!(event.schema_version, SCHEMA_VERSION);
+    assert_eq!(event.schema_version, MINIMUM_SCHEMA_VERSION);
     assert_eq!(event.kind, EventKind::InteractionRequired);
     assert_eq!(event.state, CanonicalState::WaitingForUser);
     assert_eq!(event.agent_identity().session_id, "session-7");
@@ -69,8 +69,44 @@ fn future_schema_version_is_rejected() {
         NormalizedEvent::from_json_slice(FUTURE_VERSION),
         Err(ProtocolError::Validation(
             ValidationError::UnsupportedSchemaVersion {
-                actual: 2,
-                supported: SCHEMA_VERSION
+                actual: 3,
+                minimum: MINIMUM_SCHEMA_VERSION,
+                maximum: SCHEMA_VERSION
+            }
+        ))
+    ));
+}
+
+#[test]
+fn version_two_accepts_turn_cancelled() {
+    let payload = String::from_utf8(VALID.to_vec())
+        .expect("UTF-8 fixture")
+        .replace("\"schema_version\": 1", "\"schema_version\": 2")
+        .replace(
+            "\"kind\": \"interaction_required\"",
+            "\"kind\": \"turn_cancelled\"",
+        )
+        .replace("\"state\": \"waiting_for_user\"", "\"state\": \"stopped\"");
+    let event = NormalizedEvent::from_json_slice(payload.as_bytes()).expect("version 2 cancel");
+    assert_eq!(event.kind, EventKind::TurnCancelled);
+    assert_eq!(event.state, CanonicalState::Stopped);
+}
+
+#[test]
+fn version_one_rejects_turn_cancelled() {
+    let payload = String::from_utf8(VALID.to_vec())
+        .expect("UTF-8 fixture")
+        .replace(
+            "\"kind\": \"interaction_required\"",
+            "\"kind\": \"turn_cancelled\"",
+        )
+        .replace("\"state\": \"waiting_for_user\"", "\"state\": \"stopped\"");
+    assert!(matches!(
+        NormalizedEvent::from_json_slice(payload.as_bytes()),
+        Err(ProtocolError::Validation(
+            ValidationError::KindUnsupportedBySchema {
+                kind: EventKind::TurnCancelled,
+                schema_version: 1
             }
         ))
     ));

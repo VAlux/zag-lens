@@ -13,16 +13,19 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use ulid::Ulid;
 use uuid::Uuid;
 
-/// The only normalized event schema accepted by this release.
-pub const SCHEMA_VERSION: u16 = 1;
+/// The latest normalized event schema emitted by this release.
+pub const SCHEMA_VERSION: u16 = 2;
+
+/// The oldest normalized event schema accepted by this release.
+pub const MINIMUM_SCHEMA_VERSION: u16 = 1;
 
 /// Default and absolute bridge-to-plugin payload limit.
 pub const MAX_PAYLOAD_BYTES: usize = 65_536;
 
 /// A harness-neutral lifecycle event delivered to the Zellij plugin.
 ///
-/// Serde intentionally ignores unknown JSON fields. This allows schema version
-/// 1 producers to add non-semantic metadata without breaking older consumers.
+/// Serde intentionally ignores unknown JSON fields. This allows producers to
+/// add non-semantic metadata without breaking older consumers of that schema.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NormalizedEvent {
     pub schema_version: u16,
@@ -50,7 +53,8 @@ impl NormalizedEvent {
     /// Parses and validates one bridge-to-plugin payload.
     ///
     /// The byte limit is checked before JSON allocation. Unknown fields are
-    /// ignored, while unknown schema versions, kinds, and states are rejected.
+    /// ignored, while unsupported schema versions, kinds, and states are
+    /// rejected.
     ///
     /// # Errors
     ///
@@ -94,10 +98,17 @@ impl NormalizedEvent {
     /// Returns [`ValidationError`] for an unsupported schema, malformed
     /// identifier or timestamp, empty required value, or inconsistent state.
     pub fn validate(&self) -> Result<(), ValidationError> {
-        if self.schema_version != SCHEMA_VERSION {
+        if !(MINIMUM_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&self.schema_version) {
             return Err(ValidationError::UnsupportedSchemaVersion {
                 actual: self.schema_version,
-                supported: SCHEMA_VERSION,
+                minimum: MINIMUM_SCHEMA_VERSION,
+                maximum: SCHEMA_VERSION,
+            });
+        }
+        if self.schema_version == 1 && self.kind == EventKind::TurnCancelled {
+            return Err(ValidationError::KindUnsupportedBySchema {
+                kind: self.kind,
+                schema_version: self.schema_version,
             });
         }
         if !is_event_id(&self.event_id) {
@@ -167,6 +178,7 @@ pub enum EventKind {
     InteractionRequired,
     TurnCompleted,
     TurnFailed,
+    TurnCancelled,
     SessionEnded,
 }
 
@@ -180,7 +192,7 @@ impl EventKind {
             Self::InteractionRequired => CanonicalState::WaitingForUser,
             Self::TurnCompleted => CanonicalState::Succeeded,
             Self::TurnFailed => CanonicalState::Failed,
-            Self::SessionEnded => CanonicalState::Stopped,
+            Self::TurnCancelled | Self::SessionEnded => CanonicalState::Stopped,
         }
     }
 
@@ -193,6 +205,7 @@ impl EventKind {
             Self::InteractionRequired => "interaction_required",
             Self::TurnCompleted => "turn_completed",
             Self::TurnFailed => "turn_failed",
+            Self::TurnCancelled => "turn_cancelled",
             Self::SessionEnded => "session_ended",
         }
     }
@@ -335,8 +348,19 @@ pub enum ProtocolError {
 /// Semantic validation failure for a decoded event.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum ValidationError {
-    #[error("unsupported schema version {actual}; supported version is {supported}")]
-    UnsupportedSchemaVersion { actual: u16, supported: u16 },
+    #[error(
+        "unsupported schema version {actual}; supported versions are {minimum} through {maximum}"
+    )]
+    UnsupportedSchemaVersion {
+        actual: u16,
+        minimum: u16,
+        maximum: u16,
+    },
+    #[error("kind {kind} is not supported by schema version {schema_version}")]
+    KindUnsupportedBySchema {
+        kind: EventKind,
+        schema_version: u16,
+    },
     #[error("event_id must be a UUID or ULID")]
     InvalidEventId,
     #[error("occurred_at must be an RFC 3339 timestamp")]

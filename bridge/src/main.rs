@@ -13,10 +13,12 @@ use zag_lens_installer::{Component, InstallPaths, Installer, Operation, PlanCont
 use zag_lens_notifier::{
     BackendConfig, CommandConfig, DeliveryStatus, Notification, deliver, sanitize_field,
 };
+use zag_lens_opencode_adapter::OpenCodeAdapter;
 
 const ZELLIJ_BASELINE: &str = "0.44.1";
 const CODEX_BASELINE: &str = "0.144.3";
 const CLAUDE_BASELINE: &str = "2.1.207";
+const OPENCODE_BASELINE: &str = "1.17.15";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -47,6 +49,7 @@ enum CliCommand {
 enum Harness {
     Codex,
     Claude,
+    Opencode,
 }
 
 #[derive(Debug, Args)]
@@ -63,6 +66,8 @@ struct HookArgs {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum NotificationBackend {
     Auto,
+    #[value(name = "applescript")]
+    AppleScript,
     Command,
     Bell,
     Off,
@@ -99,14 +104,16 @@ struct ComponentArgs {
     codex: bool,
     #[arg(long)]
     claude: bool,
+    #[arg(long)]
+    opencode: bool,
 }
 
 impl ComponentArgs {
     fn selection(&self) -> Selection {
-        if self.all || !(self.zellij || self.codex || self.claude) {
+        if self.all || !(self.zellij || self.codex || self.claude || self.opencode) {
             return Selection::all();
         }
-        let mut components = Vec::with_capacity(3);
+        let mut components = Vec::with_capacity(4);
         if self.zellij {
             components.push(Component::Zellij);
         }
@@ -115,6 +122,9 @@ impl ComponentArgs {
         }
         if self.claude {
             components.push(Component::Claude);
+        }
+        if self.opencode {
+            components.push(Component::OpenCode);
         }
         Selection::from_components(components)
     }
@@ -201,6 +211,13 @@ fn run_hook(args: &HookArgs) {
             &environment,
             &transport,
         ),
+        Harness::Opencode => process_hook(
+            &OpenCodeAdapter,
+            &args.event,
+            stdin.lock(),
+            &environment,
+            &transport,
+        ),
     };
 
     if (args.debug || debug_from_environment())
@@ -213,6 +230,7 @@ fn run_hook(args: &HookArgs) {
 fn run_notification(args: &NotifyArgs) {
     let config = match args.backend {
         NotificationBackend::Auto => BackendConfig::Auto,
+        NotificationBackend::AppleScript => BackendConfig::AppleScript,
         NotificationBackend::Command => {
             let Some(program) = args.command.clone() else {
                 debug_notification(args, "command backend requires --command");
@@ -448,6 +466,7 @@ fn remove_selected_assets(
     if selection.contains(Component::Zellij)
         && selection.contains(Component::Codex)
         && selection.contains(Component::Claude)
+        && selection.contains(Component::OpenCode)
     {
         remove_asset(&paths.binary, dry_run, true)?;
     }
@@ -500,6 +519,7 @@ fn run_doctor() -> Result<(), String> {
         ("zellij", ZELLIJ_BASELINE),
         ("codex", CODEX_BASELINE),
         ("claude", CLAUDE_BASELINE),
+        ("opencode", OPENCODE_BASELINE),
     ] {
         match command_version(program) {
             Ok(version) => println!("{program}: {version} (baseline {baseline})"),
@@ -517,6 +537,7 @@ fn run_doctor() -> Result<(), String> {
         ("zellij config", &paths.zellij_config),
         ("codex hooks", &paths.codex_hooks),
         ("claude settings", &paths.claude_settings),
+        ("opencode plugin", &paths.opencode_plugin),
         ("ownership manifest", &paths.manifest),
     ] {
         let state = if path.exists() {
@@ -574,6 +595,7 @@ mod tests {
         assert!(selection.contains(Component::Zellij));
         assert!(selection.contains(Component::Codex));
         assert!(selection.contains(Component::Claude));
+        assert!(selection.contains(Component::OpenCode));
     }
 
     #[test]
@@ -586,6 +608,7 @@ mod tests {
         assert!(!selection.contains(Component::Zellij));
         assert!(selection.contains(Component::Codex));
         assert!(!selection.contains(Component::Claude));
+        assert!(!selection.contains(Component::OpenCode));
     }
 
     #[test]
@@ -609,6 +632,27 @@ mod tests {
             panic!("notify command expected");
         };
         assert_eq!(args.command_args, [OsString::from("--urgency=normal")]);
+    }
+
+    #[test]
+    fn applescript_backend_is_accepted_without_command_arguments() {
+        let cli = Cli::try_parse_from([
+            "zag-lens",
+            "notify",
+            "--backend",
+            "applescript",
+            "--title",
+            "title",
+            "--body",
+            "body",
+        ])
+        .expect("valid CLI");
+        let CliCommand::Notify(args) = cli.command else {
+            panic!("notify command expected");
+        };
+        assert!(matches!(args.backend, NotificationBackend::AppleScript));
+        assert!(args.command.is_none());
+        assert!(args.command_args.is_empty());
     }
 
     #[test]

@@ -14,6 +14,7 @@ time = { version = "0.3", features = ["formatting"] }
 ulid = "1.2"
 zag-lens-claude-adapter = { path = "../adapters/claude" }
 zag-lens-codex-adapter = { path = "../adapters/codex" }
+zag-lens-opencode-adapter = { path = "../adapters/opencode" }
 zag-lens-installer = { path = "../crates/installer" }
 zag-lens-notifier = { path = "../crates/notifier" }
 zag-lens-protocol = { path = "../crates/protocol" }

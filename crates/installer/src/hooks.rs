@@ -196,7 +196,9 @@ fn desired_hooks(binary: &Path, component: Component) -> Vec<OwnedHook> {
     let (harness, events) = match component {
         Component::Codex => ("codex", CODEX_EVENTS),
         Component::Claude => ("claude", CLAUDE_EVENTS),
-        Component::Zellij => unreachable!("Zellij does not use JSON hooks"),
+        Component::Zellij | Component::OpenCode => {
+            unreachable!("component does not use JSON hooks")
+        }
     };
     let executable = shell_quote(&binary.to_string_lossy());
     events

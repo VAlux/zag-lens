@@ -384,6 +384,9 @@ impl Default for Reducer {
 }
 
 fn is_out_of_order(cursor: &EventCursor, event: &NormalizedEvent, occurred_at: i128) -> bool {
+    if cursor.kind == EventKind::TurnCancelled && event.kind == EventKind::TurnCompleted {
+        return true;
+    }
     if occurred_at != cursor.occurred_at_unix_nanos {
         return occurred_at < cursor.occurred_at_unix_nanos;
     }
@@ -412,7 +415,8 @@ const fn event_precedence(kind: EventKind) -> u8 {
         EventKind::InteractionRequired => 3,
         EventKind::TurnCompleted => 4,
         EventKind::TurnFailed => 5,
-        EventKind::SessionEnded => 6,
+        EventKind::TurnCancelled => 6,
+        EventKind::SessionEnded => 7,
     }
 }
 
@@ -654,6 +658,7 @@ mod tests {
             ),
             (EventKind::TurnCompleted, CanonicalState::Succeeded),
             (EventKind::TurnFailed, CanonicalState::Failed),
+            (EventKind::TurnCancelled, CanonicalState::Stopped),
         ];
 
         for (second, (kind, state)) in cases.into_iter().enumerate() {
@@ -772,7 +777,11 @@ mod tests {
 
     #[test]
     fn new_activity_clears_every_resumable_terminal_state() {
-        for terminal_kind in [EventKind::TurnCompleted, EventKind::TurnFailed] {
+        for terminal_kind in [
+            EventKind::TurnCompleted,
+            EventKind::TurnFailed,
+            EventKind::TurnCancelled,
+        ] {
             let mut reducer = Reducer::default();
             applied(
                 reducer
@@ -803,6 +812,41 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(transition.current.unwrap().state, CanonicalState::Working);
+    }
+
+    #[test]
+    fn cancelled_turn_suppresses_trailing_completion_until_work_resumes() {
+        let mut reducer = Reducer::default();
+        applied(
+            reducer
+                .apply(&event(EventKind::TurnCancelled, "2026-07-13T12:00:00Z"))
+                .unwrap(),
+        );
+        assert_eq!(
+            reducer
+                .apply(&event(EventKind::TurnCompleted, "2026-07-13T12:00:01Z"))
+                .unwrap(),
+            ApplyOutcome::OutOfOrder
+        );
+        assert_eq!(
+            reducer.agents().next().unwrap().state,
+            CanonicalState::Stopped
+        );
+
+        applied(
+            reducer
+                .apply(&event(EventKind::TurnStarted, "2026-07-13T12:00:02Z"))
+                .unwrap(),
+        );
+        applied(
+            reducer
+                .apply(&event(EventKind::TurnCompleted, "2026-07-13T12:00:03Z"))
+                .unwrap(),
+        );
+        assert_eq!(
+            reducer.agents().next().unwrap().state,
+            CanonicalState::Succeeded
+        );
     }
 
     #[test]

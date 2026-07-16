@@ -94,6 +94,7 @@ impl FromStr for NotificationFocus {
 pub enum NotificationBackend {
     #[default]
     Auto,
+    AppleScript,
     Command,
     Bell,
     Off,
@@ -104,6 +105,7 @@ impl NotificationBackend {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
+            Self::AppleScript => "applescript",
             Self::Command => "command",
             Self::Bell => "bell",
             Self::Off => "off",
@@ -117,6 +119,7 @@ impl FromStr for NotificationBackend {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "auto" => Ok(Self::Auto),
+            "applescript" => Ok(Self::AppleScript),
             "command" => Ok(Self::Command),
             "bell" => Ok(Self::Bell),
             "off" => Ok(Self::Off),
@@ -564,6 +567,7 @@ fn harness_display_name(value: &str) -> String {
     match value {
         "codex" => "Codex".to_owned(),
         "claude" | "claude-code" | "claude_code" => "Claude Code".to_owned(),
+        "opencode" | "open-code" | "open_code" => "OpenCode".to_owned(),
         _ => non_empty_or(sanitize_field(value, 48), "Agent"),
     }
 }
@@ -764,6 +768,29 @@ mod tests {
     }
 
     #[test]
+    fn applescript_backend_needs_no_command_configuration() {
+        let values =
+            BTreeMap::from([("notification_backend".to_owned(), "applescript".to_owned())]);
+        let parsed = AttentionConfig::parse_zellij(&values);
+        assert!(parsed.invalid_keys.is_empty());
+        let mut controller = AttentionController::new(parsed.config);
+
+        let request = emitted(controller.evaluate(&waiting(None), inactive_tab(), true));
+        assert_eq!(
+            request.args,
+            [
+                "notify",
+                "--backend",
+                "applescript",
+                "--title",
+                "Claude Code needs attention",
+                "--body",
+                "review · permission",
+            ]
+        );
+    }
+
+    #[test]
     fn invalid_command_configuration_falls_back_without_affecting_titles() {
         let values = BTreeMap::from([
             ("notification_backend".to_owned(), "command".to_owned()),
@@ -936,6 +963,42 @@ mod tests {
                 expected_title
             );
         }
+    }
+
+    #[test]
+    fn cancellation_clears_attention_without_a_completion_notification() {
+        let config = AttentionConfig {
+            policy: NotificationPolicy::WaitingAndComplete,
+            ..AttentionConfig::default()
+        };
+        let cancelled = transition(
+            Some(snapshot(
+                CanonicalState::WaitingForUser,
+                Some("turn-1"),
+                Some("permission"),
+                None,
+            )),
+            Some(snapshot(
+                CanonicalState::Stopped,
+                Some("turn-1"),
+                None,
+                None,
+            )),
+            EventKind::TurnCancelled,
+        );
+        let mut controller = AttentionController::new(config);
+        let _ = controller.evaluate(&waiting(None), inactive_tab(), true);
+        assert_eq!(controller.outstanding_len(), 1);
+        assert_eq!(
+            controller.evaluate(&cancelled, inactive_tab(), true),
+            NotificationDecision::Suppressed(SuppressionReason::NotNotifiable)
+        );
+        assert_eq!(controller.outstanding_len(), 0);
+    }
+
+    #[test]
+    fn opencode_has_a_user_facing_display_name() {
+        assert_eq!(harness_display_name("opencode"), "OpenCode");
     }
 
     #[test]

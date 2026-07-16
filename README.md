@@ -4,10 +4,10 @@
 
 ![Example](screenshots/tab_bar_example.png)
 
-Zag Lens is a background Zellij plugin that reports Codex and Claude Code agent
-state in tab titles and notifies the user when an agent needs interaction. It
-uses lifecycle hooks and a versioned JSON protocol; it does not scrape terminal
-contents or agent transcripts.
+Zag Lens is a background Zellij plugin that reports Codex, Claude Code, and
+OpenCode agent state in tab titles and notifies the user when an agent needs
+interaction. It uses lifecycle hooks and a versioned JSON protocol; it does not
+scrape terminal contents or agent transcripts.
 
 This repository contains the Rust host executable, Zellij WASM plugin, adapters,
 installer, notification backends, and deterministic test fixtures.
@@ -30,17 +30,38 @@ The script detects the host platform, downloads the native binary and WASM
 plugin from the [latest release](https://github.com/VAlux/zag-lens/releases/latest),
 verifies both against `SHA256SUMS`, and runs the user-level installer.
 
-By default, setup configures Zellij, Codex, and Claude Code while preserving
-unrelated configuration. Then restart Zellij, approve the requested
-application-state permissions, and inspect and trust the Zag Lens commands in
-Codex with `/hooks`. Claude Code does not require a separate hook-trust step.
+By default, setup configures Zellij, Codex, Claude Code, and OpenCode while
+preserving unrelated configuration. Then restart Zellij and OpenCode, approve
+the requested application-state permissions, and inspect and trust the Zag Lens
+commands in Codex with `/hooks`. Claude Code and OpenCode do not require a
+separate hook-trust step.
 
-The installer places the host executable and WASM plugin in user-level XDG or
-`~/.local` directories. Confirm the result with:
+The installer places the host executable, Zellij WASM plugin, and OpenCode
+integration in user-level XDG or `~/.local` directories. Confirm the result
+with:
 
 ```sh
 ~/.local/bin/zag-lens doctor
 ```
+
+## Supported Harnesses
+
+| Harness | Baseline | Integration |
+| --- | --- | --- |
+| Codex CLI | 0.144.3 | Observational command lifecycle hooks. |
+| Claude Code | 2.1.207 | Observational command and notification hooks. |
+| OpenCode | 1.17.15 | Auto-loaded global plugin for the local TUI. |
+
+OpenCode support currently targets a local `opencode` TUI started inside a
+Zellij pane. Child and background-agent sessions participate in the tab's
+aggregate status. `opencode serve`, `opencode attach`, web and desktop clients,
+and remote cross-pane routing are not yet supported.
+
+Setup installs a dependency-free plugin at
+`$XDG_CONFIG_HOME/opencode/plugins/zag-lens.js`, or
+`~/.config/opencode/plugins/zag-lens.js` when `XDG_CONFIG_HOME` is unset.
+OpenCode loads this directory automatically, so no `opencode.json` entry or npm
+dependency is required. Restart a running OpenCode TUI after setup or upgrade.
 
 ## Updating
 
@@ -53,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/VAlux/zag-lens/main/scripts/install
 The installer atomically replaces the native executable and WASM plugin while
 preserving existing configuration and hooks. Setup is idempotent, so rerunning
 it when Zag Lens is already current leaves the configuration unchanged. Restart
-Zellij afterward to load the updated plugin.
+Zellij and any running OpenCode TUI afterward to load the updated plugins.
 
 ## Tab Statuses
 
@@ -78,7 +99,8 @@ Icons and the title format are configurable; see
 - the `rustfmt` and `clippy` components
 - the `wasm32-wasip1` target
 - Zellij 0.44.1 or newer for integration testing
-- Codex CLI 0.144.3 and Claude Code 2.1.207 for live adapter smoke tests
+- Codex CLI 0.144.3, Claude Code 2.1.207, and OpenCode 1.17.15 for live adapter
+  smoke tests
 
 The checked-in `rust-toolchain.toml` selects the required Rust components and
 target automatically.
@@ -102,9 +124,17 @@ target/release/zag-lens setup \
   --plugin-wasm target/wasm32-wasip1/release/zag_lens_plugin.wasm
 ```
 
+To install or preview only the OpenCode integration, the WASM path is not
+required:
+
+```sh
+target/release/zag-lens setup --opencode --dry-run
+target/release/zag-lens setup --opencode
+```
+
 Setup preserves unrelated Zellij and harness configuration and records its own
-entries for safe uninstall. Restart Zellij after setup. In Codex, inspect and
-trust the installed commands with `/hooks` before expecting events.
+entries for safe uninstall. Restart Zellij and OpenCode after setup. In Codex,
+inspect and trust the installed commands with `/hooks` before expecting events.
 
 See [installation](docs/installation.md) and
 [configuration](docs/configuration.md) for paths, component selection,
@@ -119,6 +149,7 @@ shellcheck scripts/install.sh scripts/test-install.sh
 sh scripts/test-install.sh
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --exclude zag-lens-plugin
+cargo test -p zag-lens-opencode-adapter
 cargo test -p zag-lens-plugin --bin zag_lens_plugin
 cargo check -p zag-lens-plugin --target wasm32-wasip1
 cargo build -p zag-lens-plugin --release --target wasm32-wasip1
@@ -126,12 +157,12 @@ cargo build -p zag-lens-plugin --release --target wasm32-wasip1
 
 Hook and adapter code must remain fail-open and stdout-silent. Never derive
 agent state by scraping terminal output, transcripts, prompts, or assistant
-messages.
+message text.
 
 The [development guide](docs/development.md) covers package-specific tests and
 manual live smoke tests. See [compatibility](docs/compatibility.md) for the
 tested versions, event coverage, and current limitations. `SPECIFICATION.md`
-defines the behavior contract; `PLAN.md` tracks implementation phases.
+defines the behavior contract.
 
 ## Privacy and Permissions
 
@@ -140,8 +171,10 @@ mapping and titles. It requests `RunCommands` only when notifications are
 enabled. Denying that optional permission leaves title status operational.
 
 Zag Lens transports normalized lifecycle metadata, never full prompts, tool
-arguments, tool results, command output, or transcripts. Notification text is
-sanitized and bounded before delivery.
+arguments, tool results, command output, or transcripts. The OpenCode plugin
+projects native events onto allowlisted identifiers and coarse status fields
+before invoking the bridge; raw OpenCode event payloads are not transported.
+Notification text is sanitized and bounded before delivery.
 
 ## Release Artifacts
 

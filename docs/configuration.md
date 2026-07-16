@@ -34,7 +34,7 @@ the plugin invokes `zag-lens` through the environment inherited by Zellij.
 | `mapping_timeout_ms` | `2000` | `1` through `60000`. |
 | `notification_policy` | `waiting-only` | `waiting-only`, `waiting-and-complete`, or `off`. |
 | `notification_focus` | `inactive-tab` | `inactive-tab`, `always`, or `never`. |
-| `notification_backend` | `auto` | `auto`, `command`, `bell`, or `off`. |
+| `notification_backend` | `auto` | `auto`, `applescript`, `command`, `bell`, or `off`. |
 | `notification_command` | none | Trusted executable required by the `command` backend. |
 | `notification_command_args` | `[]` | JSON array containing up to 64 fixed arguments. |
 | `include_message_details` | `false` | Includes only the adapter's normalized coarse summary. |
@@ -49,6 +49,18 @@ not disable title updates.
 `PermissionRequest` and `permission_prompt` events are deduplicated by agent,
 turn, and coarse interaction kind. `inactive-tab` suppresses delivery when the
 affected Zellij tab is active; it does not detect operating-system window focus.
+
+On macOS, `auto` uses the built-in AppleScript backend. Select it explicitly
+with one setting when desired; it requires no executable or argument
+configuration:
+
+```kdl
+notification_backend "applescript"
+```
+
+The backend invokes `/usr/bin/osascript` directly without a shell and passes the
+sanitized title and body as separate arguments to constant script source. It is
+unsupported on non-macOS platforms.
 
 Configure a custom command backend with an executable and a JSON argv prefix:
 

@@ -1,0 +1,5 @@
+{
+  "event_type": "session.error",
+  "session_id": "ses_local_7",
+  "error_name": "MessageAbortedError"
+}

@@ -9,13 +9,14 @@ Zag Lens is a background Zellij plugin that shows the state of terminal-based
 coding agents in Zellij tab titles and notifies the user when an agent needs
 interaction.
 
-The first supported agent harnesses are Codex CLI and Claude Code. The design
-uses harness lifecycle hooks and a versioned, harness-neutral event protocol so
-that other harnesses can be added without changing the core plugin.
+The first supported agent harnesses are Codex CLI, Claude Code, and the local
+OpenCode TUI. The design uses harness lifecycle events and a versioned,
+harness-neutral event protocol so that other harnesses can be added without
+changing the core plugin.
 
 The MVP must:
 
-1. Receive lifecycle events emitted by Codex and Claude Code.
+1. Receive lifecycle events emitted by Codex, Claude Code, and OpenCode.
 2. Normalize those events into a small common state model.
 3. Associate each agent session with the Zellij pane and tab in which it runs.
 4. Add a simple status icon to the affected tab title.
@@ -25,7 +26,8 @@ The MVP must:
 
 ## 2. Terminology
 
-- **Harness**: A terminal agent application, initially `codex` or `claude`.
+- **Harness**: A terminal agent application, initially `codex`, `claude`, or
+  `opencode`.
 - **Harness event**: A native lifecycle hook invocation from a harness.
 - **Adapter**: Code that translates one harness's event into the Zag Lens event
   protocol.
@@ -159,6 +161,7 @@ Therefore, `inactive-tab` refers only to Zellij tab focus.
 flowchart LR
     C[Codex hooks] --> B[Host bridge]
     A[Claude Code hooks] --> B
+    O[OpenCode local plugin] --> B
     B -->|normalized JSON over named Zellij pipe| P[Hidden Zag Lens plugin]
     P --> M[State reducer and pane-to-tab mapping]
     M --> T[Tab title decorator]
@@ -248,7 +251,7 @@ Every bridge-to-plugin message is UTF-8 JSON with this logical shape:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "event_id": "01J...",
   "occurred_at": "2026-07-13T12:00:00.000Z",
   "harness": "codex",
@@ -288,12 +291,17 @@ The accepted `kind` values in schema version 1 are:
 - `turn_failed`;
 - `session_ended`.
 
+Schema version 2 retains all version 1 kinds and adds `turn_cancelled`. A
+version 2 consumer MUST continue to accept version 1 payloads. Producers MUST
+emit the latest schema version. Unknown future schema versions MUST be rejected
+without changing state.
+
 The accepted `state` values are `ready`, `working`, `waiting_for_user`,
 `succeeded`, `failed`, `stale`, and `stopped`.
 
-Unknown fields MUST be ignored. Unknown schema versions MUST be rejected without
-changing state. Payloads larger than 64 KiB MUST be rejected. Adapters SHOULD
-discard native fields not needed by the normalized protocol before transport.
+Unknown fields MUST be ignored. Payloads larger than 64 KiB MUST be rejected.
+Adapters SHOULD discard native fields not needed by the normalized protocol
+before transport.
 
 ### 7.2 Identity and deduplication
 
@@ -323,6 +331,7 @@ activity                     -> working
 interaction_required         -> waiting_for_user
 turn_completed               -> succeeded
 turn_failed                  -> failed
+turn_cancelled               -> stopped
 session_ended                -> stopped
 inactivity timeout           -> stale
 ```
@@ -330,7 +339,8 @@ inactivity timeout           -> stale
 Any new turn or activity clears `succeeded`, `failed`, and `stale`. A concrete
 activity event following an interaction event clears `waiting_for_user` because
 the agent has resumed. `session_ended` removes the instance after title
-recomputation.
+recomputation. A completion emitted after `turn_cancelled` for the same execution
+MUST be ignored until a new turn or activity reopens the agent instance.
 
 The reducer MUST be deterministic and independently unit-testable. Notification
 side effects occur only after a successful state transition.
@@ -402,7 +412,45 @@ the same interaction kind.
 
 Claude hook handlers MUST return success without decisions or blocking output.
 
-### 9.3 Adding another harness
+### 9.3 OpenCode adapter
+
+The OpenCode integration installs a dependency-free plugin in the global
+OpenCode plugin directory. OpenCode loads this directory at startup. The plugin
+MUST invoke the bridge directly without a shell, MUST remain fail-open, and MUST
+no-op outside a Zellij pane.
+
+The initial mapping is:
+
+| OpenCode event | Matcher | Normalized kind | State |
+| --- | --- | --- | --- |
+| `session.created` | any | `session_started` | `ready` |
+| `session.status` | `busy` | `turn_started` | `working` |
+| `session.status` | `retry` | `activity` | `working` |
+| `permission.asked` | any | `interaction_required` | `waiting_for_user` |
+| `question.asked` | any | `interaction_required` | `waiting_for_user` |
+| `permission.replied` | `once` or `always` | `activity` | `working` |
+| `permission.replied` | `reject` | `turn_cancelled` | `stopped` |
+| `question.replied` | any | `activity` | `working` |
+| `question.rejected` | any | `turn_cancelled` | `stopped` |
+| `message.updated` | completed assistant without error | `turn_completed` | `succeeded` |
+| `session.error` | `MessageAbortedError` | `turn_cancelled` | `stopped` |
+| `session.error` | other named error | `turn_failed` | `failed` |
+| `session.deleted` | any | `session_ended` | `stopped` |
+
+`session.idle`, idle status events, incomplete messages, message text, and
+completed assistant messages carrying an error MUST be ignored. The plugin MUST
+send only allowlisted session and turn identifiers, status/reply enums,
+completion/error-presence flags, and error names to the bridge. Native prompts,
+questions, permission patterns, metadata, tool data, assistant text, error
+messages, and raw event payloads MUST NOT be transported.
+
+Every observed OpenCode session, including child sessions, participates in
+normal tab aggregation. The initial integration supports only a local OpenCode
+TUI whose process inherits the originating Zellij pane environment. Servers,
+attached or remote clients, web clients, and desktop clients are outside this
+scope.
+
+### 9.4 Adding another harness
 
 A new adapter MUST provide:
 
@@ -454,13 +502,19 @@ The notifier is an interface separate from state reduction. The MVP SHOULD
 provide:
 
 - `auto`: choose a supported host backend;
+- `applescript`: invoke the built-in macOS AppleScript backend;
 - `command`: invoke a configured executable and argument list;
 - `bell`: emit a terminal attention signal where supported;
 - `off`.
 
-An automatic host backend may use macOS Notification Center, Linux freedesktop
-notifications, or an equivalent platform facility. Backend failure MUST NOT
+On macOS, the automatic host backend uses the built-in AppleScript backend to
+deliver through Notification Center. On Linux it may use freedesktop
+notifications or an equivalent platform facility. Backend failure MUST NOT
 change agent state or block event processing.
+
+The AppleScript backend MUST execute `/usr/bin/osascript` directly without a
+shell. Its script source MUST be constant, and notification fields MUST be
+passed only as separate argv values.
 
 Configured commands MUST be executed as an argv array without a shell. Event
 text MUST never be interpolated into shell source. Control characters and
@@ -568,9 +622,9 @@ pane MAY display these records, but no visible pane is required for the MVP.
 ### 16.3 Compatibility tests
 
 Adapter fixtures MUST be versioned. CI SHOULD test against the oldest supported
-Zellij plugin API and representative supported Codex and Claude Code versions.
-When a harness changes its hook schema, a new fixture is added before the
-supported version range is expanded.
+Zellij plugin API and representative supported Codex, Claude Code, and OpenCode
+versions. When a harness changes its hook schema, a new fixture is added before
+the supported version range is expanded.
 
 ## 17. MVP acceptance criteria
 
@@ -580,13 +634,15 @@ The MVP is complete when all of the following are demonstrated:
 2. A Codex permission request changes the title to `waiting_for_user` and emits
    one notification.
 3. Completing a Codex turn shows `succeeded` and then restores the base title.
-4. The equivalent start, permission/notification, completion, failure, and
-   session-end flows work for Claude Code where native hooks exist.
-5. Codex and Claude Code can run concurrently in different panes and tabs.
+4. The equivalent start, interaction, completion, failure, cancellation, and
+   session-end flows work for Claude Code and OpenCode where native events
+   exist.
+5. Codex, Claude Code, and OpenCode can run concurrently in different panes and
+   tabs.
 6. Multiple agents in one tab follow the documented aggregation priority.
 7. User-renamed tab titles survive status changes and normal plugin shutdown.
 8. Duplicate, malformed, and oversized events do not crash the plugin or block
-   either harness.
+   any harness.
 9. Disabling or denying desktop notification support leaves icon updates fully
    operational.
 10. No terminal-output scraping or transcript parsing is used.
@@ -607,6 +663,7 @@ The MVP is complete when all of the following are demonstrated:
 
 - Implement the shared bridge and Codex adapter.
 - Implement the Claude Code adapter.
+- Implement the OpenCode local-plugin adapter.
 - Add hook installation templates and diagnostics.
 
 ### Phase 4: notifications and hardening
@@ -619,7 +676,7 @@ The MVP is complete when all of the following are demonstrated:
 The following can be resolved during implementation without changing the core
 contract:
 
-- minimum supported versions for Zellij, Codex, and Claude Code;
+- minimum supported versions for Zellij, Codex, Claude Code, and OpenCode;
 - implementation language and packaging of the host bridge;
 - which desktop notifier backends ship in the first release;
 - whether same-state agent counts graduate into the default title format;
@@ -629,8 +686,9 @@ contract:
 
 ## 20. Informative implementation baseline and references
 
-This draft was checked locally with Zellij 0.44.1, Codex CLI 0.144.3, and Claude
-Code 2.1.207. These are validation points, not yet declared minimum versions.
+This draft was checked locally with Zellij 0.44.1, Codex CLI 0.144.3, Claude
+Code 2.1.207, and OpenCode 1.17.15. These are validation points, not yet
+declared minimum versions.
 
 - [Zellij plugin commands](https://zellij.dev/documentation/plugin-api-commands)
 - [Zellij plugin events](https://zellij.dev/documentation/plugin-api-events)
@@ -639,3 +697,4 @@ Code 2.1.207. These are validation points, not yet declared minimum versions.
 - [Zellij background plugin loading](https://zellij.dev/documentation/plugin-loading.html)
 - [Codex lifecycle hooks](https://developers.openai.com/codex/hooks/)
 - [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
+- [OpenCode plugins](https://opencode.ai/docs/plugins/)

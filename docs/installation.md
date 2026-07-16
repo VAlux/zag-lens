@@ -11,11 +11,13 @@ uninstall.
 - Zellij 0.44.1 or newer
 - Codex CLI 0.144.3 or newer, when enabling Codex hooks
 - Claude Code 2.1.207 or newer, when enabling Claude hooks
+- OpenCode 1.17.15 or newer, when enabling the OpenCode local-TUI plugin
 - macOS or Linux for the automatic desktop notification backend
 
-Run `zellij --version`, `codex --version`, and `claude --version` to inspect the
-installed tools. After building Zag Lens, `target/release/zag-lens doctor`
-reports these versions and every resolved installation path.
+Run `zellij --version`, `codex --version`, `claude --version`, and
+`opencode --version` to inspect the installed tools. After building Zag Lens,
+`target/release/zag-lens doctor` reports these versions and every resolved
+installation path.
 
 ## Install a Release
 
@@ -48,14 +50,17 @@ target/release/zag-lens setup \
   --plugin-wasm target/wasm32-wasip1/release/zag_lens_plugin.wasm
 ```
 
-With no component flags, `setup` selects Zellij, Codex, and Claude. Select a
-subset with `--zellij`, `--codex`, or `--claude`. `--plugin-wasm` is required
-whenever Zellij is selected. Setup is idempotent; a repeated invocation reports
-that configuration is already in the requested state.
+With no component flags, `setup` selects Zellij, Codex, Claude, and OpenCode.
+Select a subset with `--zellij`, `--codex`, `--claude`, or `--opencode`.
+`--plugin-wasm` is required whenever Zellij is selected. Setup is idempotent; a
+repeated invocation reports that configuration is already in the requested
+state.
 
 The installer adds a `zag-lens` plugin alias and background load entry to
 Zellij. It adds observational command hooks to the existing Codex and Claude
-JSON configuration rather than replacing other hook groups.
+JSON configuration rather than replacing other hook groups. It installs a
+dependency-free JavaScript file in OpenCode's global plugin directory; OpenCode
+loads that directory automatically, so setup does not edit `opencode.json`.
 
 After setup:
 
@@ -66,6 +71,7 @@ After setup:
 3. Approve `RunCommands` to enable host notifications, or deny it to retain
    title-only operation.
 4. Start Codex, open `/hooks`, inspect the Zag Lens commands, and trust them.
+5. Restart any running OpenCode TUI, then start OpenCode from a Zellij pane.
 
 ## Resolved Paths
 
@@ -76,6 +82,7 @@ After setup:
 | Zellij config | `XDG_CONFIG_HOME` | `~/.config/zellij/config.kdl` |
 | Codex hooks | `CODEX_HOME` | `~/.codex/hooks.json` |
 | Claude settings | `CLAUDE_CONFIG_DIR` | `~/.claude/settings.json` |
+| OpenCode plugin | `XDG_CONFIG_HOME` | `~/.config/opencode/plugins/zag-lens.js` |
 
 Existing configuration backups are placed next to the original file with a
 `.zag-lens-backup-<timestamp>` suffix. Setup refuses ambiguous ownership,
@@ -100,5 +107,6 @@ of deleting externally modified content.
 Build or download the new native executable and WASM asset, verify release
 checksums, then run the new executable with `setup` and the new `--plugin-wasm`
 path. Setup updates installer-owned paths and assets atomically while preserving
-unrelated configuration. Restart Zellij after a plugin upgrade. Keep the
-generated backups until the new version has passed the live smoke test.
+unrelated configuration. Restart Zellij and running OpenCode TUIs after a plugin
+upgrade. Keep the generated backups until the new version has passed the live
+smoke test.

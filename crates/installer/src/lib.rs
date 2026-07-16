@@ -9,6 +9,7 @@
 mod engine;
 mod hooks;
 mod model;
+mod opencode;
 mod paths;
 mod zellij;
 

@@ -2,7 +2,7 @@
 
 The workspace separates harness-specific parsing from the protocol and reducer:
 
-- `adapters/`: Codex and Claude Code normalization
+- `adapters/`: Codex, Claude Code, and OpenCode normalization
 - `bridge/`: fail-open `zag-lens` host CLI and pipe transport
 - `crates/protocol`: versioned normalized JSON types and validation
 - `crates/core`: deterministic reducer, aggregation, and title formatting
@@ -29,6 +29,7 @@ cargo test -p zag-lens-protocol
 cargo test -p zag-lens-core
 cargo test -p zag-lens-codex-adapter
 cargo test -p zag-lens-claude-adapter
+cargo test -p zag-lens-opencode-adapter
 cargo test -p zag-lens-installer
 cargo test -p zag-lens-notifier
 cargo test -p zag-lens
@@ -51,14 +52,17 @@ observable behavior.
 4. In another tab, start Claude Code and repeat start, harmless permission, and
    completion flows. Also confirm an explicit failure shows `×` and session end
    removes its status.
-5. Trigger only actions that already require approval under your harness policy;
+5. In a third tab, start the local OpenCode TUI. Confirm busy, permission,
+   question, completion, failure, cancellation, and child-session events. A
+   rejected question or user abort MUST clear without a completion alert.
+6. Trigger only actions that already require approval under your harness policy;
    do not weaken security policy merely to create a prompt.
-6. Run both harnesses concurrently in separate panes. Verify that each event
+7. Run the harnesses concurrently in separate panes. Verify that each event
    updates only its owning tab, and that two agents in one tab follow
    `waiting > failed > working > succeeded > stale`.
-7. Rename an active managed tab and confirm the new name remains the base title.
+8. Rename an active managed tab and confirm the new name remains the base title.
    Close the pane and then exit Zellij normally; decorations should be cleared.
-8. Repeat after denying `RunCommands`. Titles must still change while desktop
+9. Repeat after denying `RunCommands`. Titles must still change while desktop
    notifications remain absent.
 
 Test a backend independently of Zellij with:

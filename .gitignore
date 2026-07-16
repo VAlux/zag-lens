@@ -1,4 +1,4 @@
 /target/
 *.log
 .DS_Store
-
+/install_local.sh
