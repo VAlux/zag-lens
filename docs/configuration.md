@@ -12,6 +12,8 @@ plugins {
         notification_focus "inactive-tab"
         notification_backend "auto"
         icon_set "unicode"
+        icons.working "[\"◐\",\"◓\",\"◑\",\"◒\"]"
+        animation_interval_ms "250"
         success_ttl_seconds "30"
     }
 }
@@ -27,7 +29,8 @@ the plugin invokes `zag-lens` through the environment inherited by Zellij.
 | `enabled` | `true` | Enables pipe event processing. |
 | `title_format` | `{icon} {title}` | Must contain both placeholders. |
 | `icon_set` | `unicode` | `unicode` or `ascii`; other values use Unicode. |
-| `icons.<state>` | built in | Overrides `working`, `waiting_for_user`, `succeeded`, `failed`, or `stale`. |
+| `icons.<state>` | built in | Static string or JSON frame array for `working`, `waiting_for_user`, `succeeded`, `failed`, or `stale`. |
+| `animation_interval_ms` | `250` | Shared animation delay; `100` through `60000`. |
 | `show_counts` | `false` | Adds a count when multiple agents contribute the winning state. |
 | `success_ttl_seconds` | `30` | `0` through `86400`. |
 | `stale_after_seconds` | `1800` | `1` through `604800`. |
@@ -44,6 +47,35 @@ the plugin invokes `zag-lens` through the environment inherited by Zellij.
 
 Invalid values fall back to safe defaults. An invalid notification setting does
 not disable title updates.
+
+## Icon Animation
+
+Icon animation is opt-in through the icon value itself; there is no separate
+enable flag. An ordinary string remains static, as does a JSON array containing
+one frame. A JSON array with two or more string frames animates independently
+for each managed tab:
+
+```kdl
+icons.working "[\"◐\",\"◓\",\"◑\",\"◒\"]"
+icons.waiting_for_user "?"
+icons.succeeded "[\"✓\"]"
+animation_interval_ms "250"
+```
+
+Arrays are supported for every visible state. Frames may contain Unicode or
+multiple characters. Prefer frames with equal display width so the tab bar does
+not jitter as the icon changes. Counts and `title_format` are applied to every
+frame in the same way.
+
+An empty array, empty frame, non-string array element, or malformed value that
+starts like a JSON array is rejected for that state. The plugin records only a
+sanitized configuration diagnostic and uses the selected Unicode or ASCII
+built-in icon instead. An invalid `animation_interval_ms` similarly falls back
+to `250`. Built-in icon sets and scalar overrides remain entirely static.
+
+Animation timing is best-effort. The configured interval is a minimum delay
+measured after Zellij acknowledges the previous frame, so a delayed timer never
+causes skipped frames.
 
 `waiting-only` emits once for each outstanding interaction. Duplicate Claude
 `PermissionRequest` and `permission_prompt` events are deduplicated by agent,

@@ -489,41 +489,90 @@ const fn state_priority(state: CanonicalState) -> u8 {
     }
 }
 
+/// One or more non-empty frames used to render a visible status icon.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IconFrames(Vec<String>);
+
+impl IconFrames {
+    /// Creates a static icon from one non-empty frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `frame` is empty. Configuration parsers should validate
+    /// user-provided values before calling this constructor.
+    #[must_use]
+    pub fn single(frame: impl Into<String>) -> Self {
+        let frame = frame.into();
+        assert!(!frame.is_empty(), "icon frame must not be empty");
+        Self(vec![frame])
+    }
+
+    /// Creates an icon sequence when every frame is non-empty.
+    #[must_use]
+    pub fn new(frames: Vec<String>) -> Option<Self> {
+        (!frames.is_empty() && frames.iter().all(|frame| !frame.is_empty())).then_some(Self(frames))
+    }
+
+    /// Returns the selected frame, wrapping indices at the sequence length.
+    #[must_use]
+    pub fn frame(&self, index: usize) -> &str {
+        &self.0[index % self.0.len()]
+    }
+
+    /// Number of frames in this non-empty sequence.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Always returns false because empty frame sequences cannot be created.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether advancing this sequence can change the rendered icon.
+    #[must_use]
+    pub fn is_animated(&self) -> bool {
+        self.len() > 1
+    }
+}
+
 /// Built-in status glyphs, with configurable per-state overrides.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Icons {
-    pub working: String,
-    pub waiting_for_user: String,
-    pub succeeded: String,
-    pub failed: String,
-    pub stale: String,
+    pub working: IconFrames,
+    pub waiting_for_user: IconFrames,
+    pub succeeded: IconFrames,
+    pub failed: IconFrames,
+    pub stale: IconFrames,
 }
 
 impl Icons {
     #[must_use]
     pub fn unicode() -> Self {
         Self {
-            working: "●".into(),
-            waiting_for_user: "?".into(),
-            succeeded: "✓".into(),
-            failed: "×".into(),
-            stale: "!".into(),
+            working: IconFrames::single("●"),
+            waiting_for_user: IconFrames::single("?"),
+            succeeded: IconFrames::single("✓"),
+            failed: IconFrames::single("×"),
+            stale: IconFrames::single("!"),
         }
     }
 
     #[must_use]
     pub fn ascii() -> Self {
         Self {
-            working: "*".into(),
-            waiting_for_user: "?".into(),
-            succeeded: "+".into(),
-            failed: "x".into(),
-            stale: "!".into(),
+            working: IconFrames::single("*"),
+            waiting_for_user: IconFrames::single("?"),
+            succeeded: IconFrames::single("+"),
+            failed: IconFrames::single("x"),
+            stale: IconFrames::single("!"),
         }
     }
 
     #[must_use]
-    pub fn for_state(&self, state: CanonicalState) -> Option<&str> {
+    pub fn for_state(&self, state: CanonicalState) -> Option<&IconFrames> {
         match state {
             CanonicalState::Working => Some(&self.working),
             CanonicalState::WaitingForUser => Some(&self.waiting_for_user),
@@ -573,12 +622,24 @@ impl TitleConfig {
     /// Renders a base title once. Invisible or absent states return it exactly.
     #[must_use]
     pub fn render(&self, base_title: &str, aggregate: Option<AggregateStatus>) -> String {
+        self.render_frame(base_title, aggregate, 0)
+    }
+
+    /// Renders one selected icon frame. Frame indices wrap at sequence length.
+    #[must_use]
+    pub fn render_frame(
+        &self,
+        base_title: &str,
+        aggregate: Option<AggregateStatus>,
+        frame_index: usize,
+    ) -> String {
         let Some(aggregate) = aggregate else {
             return base_title.to_owned();
         };
-        let Some(icon) = self.icons.for_state(aggregate.state) else {
+        let Some(frames) = self.icons.for_state(aggregate.state) else {
             return base_title.to_owned();
         };
+        let icon = frames.frame(frame_index);
         let rendered_icon = if self.show_counts && aggregate.count > 1 {
             format!("{icon}{}", aggregate.count)
         } else {
@@ -592,6 +653,26 @@ impl TitleConfig {
         format
             .replace("{icon}", &rendered_icon)
             .replace("{title}", base_title)
+    }
+
+    /// Number of frames available for an aggregate, or one when invisible.
+    #[must_use]
+    pub fn frame_count(&self, aggregate: Option<AggregateStatus>) -> usize {
+        aggregate
+            .and_then(|aggregate| self.icons.for_state(aggregate.state))
+            .map_or(1, IconFrames::len)
+    }
+
+    /// Every exact title the aggregate's frame sequence can produce.
+    #[must_use]
+    pub fn possible_titles(
+        &self,
+        base_title: &str,
+        aggregate: Option<AggregateStatus>,
+    ) -> Vec<String> {
+        (0..self.frame_count(aggregate))
+            .map(|frame| self.render_frame(base_title, aggregate, frame))
+            .collect()
     }
 }
 
@@ -1141,6 +1222,52 @@ mod tests {
             ),
             "[?2] review"
         );
+    }
+
+    #[test]
+    fn icon_frames_render_unicode_multichar_counts_and_custom_formats() {
+        let mut icons = Icons::unicode();
+        icons.working = IconFrames::new(vec!["◐".into(), "[..]".into()]).unwrap();
+        let config = TitleConfig {
+            format: "<{icon}>:{title}".into(),
+            icons,
+            show_counts: true,
+        };
+        let status = Some(AggregateStatus {
+            state: CanonicalState::Working,
+            count: 3,
+        });
+
+        assert_eq!(config.render("compile", status), "<◐3>:compile");
+        assert_eq!(config.render_frame("compile", status, 1), "<[..]3>:compile");
+        assert_eq!(config.render_frame("compile", status, 3), "<[..]3>:compile");
+        assert_eq!(
+            config.possible_titles("compile", status),
+            ["<◐3>:compile", "<[..]3>:compile"]
+        );
+    }
+
+    #[test]
+    fn one_frame_icons_are_static_and_invisible_states_ignore_frames() {
+        let mut icons = Icons::unicode();
+        icons.failed = IconFrames::new(vec!["ERR".into()]).unwrap();
+        let config = TitleConfig {
+            icons,
+            ..TitleConfig::default()
+        };
+        let failed = Some(AggregateStatus {
+            state: CanonicalState::Failed,
+            count: 1,
+        });
+        let ready = Some(AggregateStatus {
+            state: CanonicalState::Ready,
+            count: 1,
+        });
+
+        assert_eq!(config.frame_count(failed), 1);
+        assert!(!config.icons.failed.is_animated());
+        assert_eq!(config.render_frame("build", failed, 99), "ERR build");
+        assert_eq!(config.render_frame(" build ", ready, 99), " build ");
     }
 
     #[test]

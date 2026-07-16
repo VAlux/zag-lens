@@ -16,6 +16,10 @@ Run the same baseline checks used by CI, plus native plugin unit tests:
 
 ```sh
 cargo fmt --all --check
+sh -n scripts/*.sh
+shellcheck scripts/*.sh
+sh scripts/test-install.sh
+sh scripts/test-smoke-status-tabs.sh
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --exclude zag-lens-plugin
 cargo test -p zag-lens-plugin --bin zag_lens_plugin
@@ -42,6 +46,17 @@ observable behavior.
 
 ## Manual Live Smoke Test
 
+To open one tab for each visible state without assertions or cleanup, run this
+from inside Zellij:
+
+```sh
+./scripts/smoke-status-tabs.sh
+```
+
+The script leaves the tabs open for visual inspection. The successful state
+still follows `success_ttl_seconds`, and the waiting state may emit a
+notification under the configured notification policy.
+
 1. Build and install using [installation.md](installation.md), then run
    `~/.local/bin/zag-lens doctor` (or the resolved XDG binary path).
 2. Start a fresh Zellij session. Approve application-state permissions and, for
@@ -64,6 +79,9 @@ observable behavior.
    Close the pane and then exit Zellij normally; decorations should be cleared.
 9. Repeat after denying `RunCommands`. Titles must still change while desktop
    notifications remain absent.
+10. Configure an animated `icons.working` JSON array beside a scalar state such
+    as `icons.failed "x"`. Confirm working advances in order without skipped
+    frames and failure remains unchanged.
 
 Test a backend independently of Zellij with:
 

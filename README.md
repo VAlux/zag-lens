@@ -46,11 +46,11 @@ with:
 
 ## Supported Harnesses
 
-| Harness | Baseline | Integration |
-| --- | --- | --- |
-| Codex CLI | 0.144.3 | Observational command lifecycle hooks. |
-| Claude Code | 2.1.207 | Observational command and notification hooks. |
-| OpenCode | 1.17.15 | Auto-loaded global plugin for the local TUI. |
+| Harness     | Baseline | Integration                                   |
+| ----------- | -------- | --------------------------------------------- |
+| Codex CLI   | 0.144.3  | Observational command lifecycle hooks.        |
+| Claude Code | 2.1.207  | Observational command and notification hooks. |
+| OpenCode    | 1.17.15  | Auto-loaded global plugin for the local TUI.  |
 
 OpenCode support currently targets a local `opencode` TUI started inside a
 Zellij pane. Child and background-agent sessions participate in the tab's
@@ -95,10 +95,9 @@ visible agent status:
 | `stale`             | `!`  | `! review`       | Activity stopped without a terminal event.     |
 | `ready` / `stopped` | none | `project`        | No active status is displayed.                 |
 
-Icons and the title format are configurable; see
-[configuration](docs/configuration.md).
-
 ## Plugin Configuration
+
+![Animated Example](screenshots/animated_tabs.gif)
 
 The installer creates a `zag-lens` alias in the resolved Zellij `config.kdl`.
 Customize the plugin by adding or changing child settings on that alias while
@@ -110,6 +109,8 @@ plugins {
         host_binary "/absolute/path/to/zag-lens"
         title_format "{icon} {title}"
         icon_set "unicode"
+        icons.working "[\"◐\",\"◓\",\"◑\",\"◒\"]"
+        animation_interval_ms "250"
         show_counts "false"
         success_ttl_seconds "30"
         stale_after_seconds "1800"
@@ -122,17 +123,19 @@ plugins {
 
 Common settings are:
 
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `enabled` | `true` | Enables lifecycle-event processing and title updates. |
-| `title_format` | `{icon} {title}` | Controls the decorated tab-title format. |
-| `icon_set` | `unicode` | Selects `unicode` or `ascii` built-in icons. |
-| `show_counts` | `false` | Shows a count when several agents share the winning state. |
-| `success_ttl_seconds` | `30` | Controls how long successful completion remains visible. |
-| `stale_after_seconds` | `1800` | Marks non-terminal activity stale after this interval. |
-| `notification_policy` | `waiting-only` | Controls waiting and completion notifications. |
-| `notification_focus` | `inactive-tab` | Selects `inactive-tab`, `always`, or `never`. |
-| `notification_backend` | `auto` | Selects `auto`, `applescript`, `command`, `bell`, or `off`. |
+| Setting                 | Default          | Purpose                                                     |
+| ----------------------- | ---------------- | ----------------------------------------------------------- |
+| `enabled`               | `true`           | Enables lifecycle-event processing and title updates.       |
+| `title_format`          | `{icon} {title}` | Controls the decorated tab-title format.                    |
+| `icon_set`              | `unicode`        | Selects `unicode` or `ascii` built-in icons.                |
+| `icons.<state>`         | built in         | Sets a static icon or JSON animation frame array.           |
+| `animation_interval_ms` | `250`            | Sets the shared animation delay from `100` to `60000` ms.   |
+| `show_counts`           | `false`          | Shows a count when several agents share the winning state.  |
+| `success_ttl_seconds`   | `30`             | Controls how long successful completion remains visible.    |
+| `stale_after_seconds`   | `1800`           | Marks non-terminal activity stale after this interval.      |
+| `notification_policy`   | `waiting-only`   | Controls waiting and completion notifications.              |
+| `notification_focus`    | `inactive-tab`   | Selects `inactive-tab`, `always`, or `never`.               |
+| `notification_backend`  | `auto`           | Selects `auto`, `applescript`, `command`, `bell`, or `off`. |
 
 On macOS, `notification_backend "auto"` uses the built-in AppleScript backend
 and needs no custom command configuration. Invalid settings fall back safely and
@@ -194,9 +197,10 @@ permissions, and uninstall instructions.
 
 ```sh
 cargo fmt --all --check
-sh -n scripts/install.sh scripts/test-install.sh
-shellcheck scripts/install.sh scripts/test-install.sh
+sh -n scripts/*.sh
+shellcheck scripts/*.sh
 sh scripts/test-install.sh
+sh scripts/test-smoke-status-tabs.sh
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --exclude zag-lens-plugin
 cargo test -p zag-lens-opencode-adapter

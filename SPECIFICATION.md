@@ -82,6 +82,12 @@ The MVP will not:
 Icons MUST be configurable. An ASCII preset MUST be available for terminals or
 fonts that do not render the defaults correctly.
 
+A scalar icon override MUST remain static. A non-empty JSON string array MAY
+define animation frames for any visible state; one frame is static and two or
+more frames animate. Invalid arrays or frames MUST fall back to that state's
+built-in icon and produce only a sanitized diagnostic. Implementations SHOULD
+recommend equal-width frames to avoid tab-bar jitter.
+
 ### 5.2 Title format
 
 The default format is:
@@ -471,21 +477,25 @@ For each managed stable tab ID, the plugin stores:
 - the current base title;
 - the last rendered title;
 - the aggregate state that produced it;
+- its current per-tab icon frame and acknowledgement time;
+- every exact title the current frame sequence can produce;
 - whether a rename operation is in flight.
 
 On `TabUpdate`:
 
-1. If the observed name equals the last rendered title, it is the plugin's own
-   update and the base title is unchanged.
-2. If it differs, it is treated as an external rename, any exact Zag Lens prefix
-   is removed, and the remainder becomes the new base title.
+1. If the observed name equals any exact title in the current frame sequence,
+   it is the plugin's own update and the base title is unchanged.
+2. If it differs, it is treated as an external rename, only the exact current
+   frame decoration is removed, and the remainder becomes the new base title.
 3. If the tab still has a visible state, the plugin applies a newly rendered
    title once.
 
 The plugin MUST restore base titles on normal shutdown and when the last tracked
 agent state for a tab is cleared. It SHOULD keep a small recovery journal in its
 plugin data directory so that a plugin reload can recognize and repair its own
-last applied titles.
+possible animated titles. Recovery journals MUST remain readable when upgrading
+from the original single-rendered-title format. Routine frame acknowledgements
+MUST NOT cause journal writes.
 
 Crash recovery cannot be perfect when an external title has the same syntax as
 a generated title. The plugin MUST only strip an exact configured prefix that
@@ -531,6 +541,7 @@ an implementation detail, but these logical settings are required:
 | `title_format` | `"{icon} {title}"` | Rendered tab title. |
 | `icon_set` | `unicode` | Built-in Unicode or ASCII icons. |
 | `icons.*` | values in section 5.1 | Per-state overrides. |
+| `animation_interval_ms` | `250` | Shared icon-frame delay from 100 through 60000 ms. |
 | `show_counts` | `false` | Show same-state agent count. |
 | `success_ttl_seconds` | `30` | Duration of success decoration. |
 | `stale_after_seconds` | `1800` | Inactivity before a non-terminal state is stale. |
@@ -605,6 +616,8 @@ pane MAY display these records, but no visible pane is required for the MVP.
 - Duplicate and out-of-order events do not regress terminal state.
 - Interaction notifications fire exactly once per waiting transition.
 - Title parsing preserves user names and does not accumulate prefixes.
+- Icon animation advances per tab, waits for rename acknowledgement, and wraps
+  without skipping frames.
 - Notification text sanitization removes control sequences.
 
 ### 16.2 Integration tests

@@ -19,8 +19,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Check installer syntax and lint
         run: |
-          sh -n scripts/install.sh scripts/test-install.sh
-          shellcheck scripts/install.sh scripts/test-install.sh
+          sh -n scripts/*.sh
+          shellcheck scripts/*.sh
       - name: Lint
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Test
@@ -29,6 +29,8 @@ jobs:
         run: cargo test --locked -p zag-lens-plugin --bin zag_lens_plugin
       - name: Test installer script
         run: sh scripts/test-install.sh
+      - name: Test status smoke script
+        run: sh scripts/test-smoke-status-tabs.sh
 
   plugin:
     runs-on: ubuntu-latest

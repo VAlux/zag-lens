@@ -12,14 +12,15 @@ use attention::{
 use time::OffsetDateTime;
 use title::{TitleAction, TitleManager};
 use zag_lens_core::{
-    AggregateStatus, ApplyOutcome, Icons, Reducer, ReducerConfig, TitleConfig, Transition,
-    aggregate_states,
+    AggregateStatus, ApplyOutcome, IconFrames, Icons, Reducer, ReducerConfig, TitleConfig,
+    Transition, aggregate_states,
 };
 use zag_lens_protocol::{MAX_PAYLOAD_BYTES, NormalizedEvent};
 use zellij_tile::prelude::*;
 
 const PIPE_NAME: &str = "zag-lens:event";
-const TIMER_SECONDS: f64 = 0.25;
+const NORMAL_TIMER_INTERVAL_MS: u64 = 250;
+const DEFAULT_ANIMATION_INTERVAL_MS: u64 = 250;
 const MAX_QUEUED_EVENTS: usize = 256;
 const MAX_DIAGNOSTICS: usize = 128;
 const TITLE_JOURNAL_PATH: &str = "/data/title-journal-v1";
@@ -39,8 +40,19 @@ register_plugin!(ZagLensPlugin);
 impl ZellijPlugin for ZagLensPlugin {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.runtime = RuntimeState::new(RuntimeConfig::from_zellij(&configuration));
+        if configuration.contains_key("animation_interval_ms")
+            && parse_number_checked::<u64>(configuration.get("animation_interval_ms"), 100, 60_000)
+                .is_none()
+        {
+            self.runtime
+                .record_diagnostic("invalid_animation_interval_ms");
+        }
         self.reducer = Reducer::new(reducer_config(&configuration));
-        let title_config = title_config(&configuration);
+        let parsed_title = title_config(&configuration);
+        for key in parsed_title.invalid_keys {
+            self.runtime.record_diagnostic(key);
+        }
+        let title_config = parsed_title.config;
         self.titles = match std::fs::read_to_string(TITLE_JOURNAL_PATH) {
             Ok(journal) => TitleManager::from_journal(title_config, &journal),
             Err(_) => TitleManager::new(title_config),
@@ -95,8 +107,9 @@ impl ZellijPlugin for ZagLensPlugin {
                     })
                     .collect();
                 let new_tab_ids: Vec<_> = tabs.iter().map(|tab| tab.tab_id).collect();
+                let now_ms = now_millis();
                 for tab in &tabs {
-                    let action = self.titles.observe_tab(tab.tab_id, &tab.name);
+                    let action = self.titles.observe_tab_at(tab.tab_id, &tab.name, now_ms);
                     self.execute_title_action(action);
                 }
                 for removed in old_tab_ids
@@ -136,12 +149,19 @@ impl ZellijPlugin for ZagLensPlugin {
                 }
             }
             Event::Timer(_) => {
-                self.runtime.advance_time(now_millis());
+                let now_ms = now_millis();
+                self.runtime.advance_time(now_ms);
                 self.process_ready_events();
                 for transition in self.reducer.advance_time(OffsetDateTime::now_utc()) {
                     self.handle_transition(&transition, None);
                 }
-                set_timeout(TIMER_SECONDS);
+                for action in self
+                    .titles
+                    .advance_animations(now_ms, self.runtime.config.animation_interval_ms)
+                {
+                    self.execute_title_action(Some(action));
+                }
+                set_timeout(self.next_timer_seconds());
             }
             Event::PermissionRequestResult(status) => self.on_permission_result(status),
             Event::BeforeClose => {
@@ -180,7 +200,7 @@ impl ZagLensPlugin {
                     EventType::Timer,
                     EventType::BeforeClose,
                 ]);
-                set_timeout(TIMER_SECONDS);
+                set_timeout(self.next_timer_seconds());
                 self.permission_stage = PermissionStage::Complete;
                 Self::finish_permission_flow();
             }
@@ -261,7 +281,9 @@ impl ZagLensPlugin {
 
         for tab_id in affected_tabs {
             let aggregate = self.aggregate_for_tab(tab_id);
-            let action = self.titles.set_aggregate(tab_id, aggregate);
+            let action = self
+                .titles
+                .set_aggregate_at(tab_id, aggregate, now_millis());
             self.execute_title_action(action);
         }
         self.persist_title_journal();
@@ -301,9 +323,22 @@ impl ZagLensPlugin {
     }
 
     fn persist_title_journal(&mut self) {
-        if std::fs::write(TITLE_JOURNAL_PATH, self.titles.journal_snapshot()).is_err() {
+        let Some(snapshot) = self.titles.take_dirty_journal_snapshot() else {
+            return;
+        };
+        if std::fs::write(TITLE_JOURNAL_PATH, snapshot).is_err() {
+            self.titles.mark_journal_dirty();
             self.runtime.record_diagnostic("title_journal_write_failed");
         }
+    }
+
+    fn next_timer_seconds(&self) -> f64 {
+        let interval_ms = if self.titles.has_active_animation() {
+            NORMAL_TIMER_INTERVAL_MS.min(self.runtime.config.animation_interval_ms)
+        } else {
+            NORMAL_TIMER_INTERVAL_MS
+        };
+        f64::from(u32::try_from(interval_ms).unwrap_or(u32::MAX)) / 1_000.0
     }
 }
 
@@ -343,32 +378,65 @@ fn reducer_config(values: &BTreeMap<String, String>) -> ReducerConfig {
     }
 }
 
-fn title_config(values: &BTreeMap<String, String>) -> TitleConfig {
+struct ParsedTitleConfig {
+    config: TitleConfig,
+    invalid_keys: Vec<&'static str>,
+}
+
+fn title_config(values: &BTreeMap<String, String>) -> ParsedTitleConfig {
     let mut icons = if values.get("icon_set").map(String::as_str) == Some("ascii") {
         Icons::ascii()
     } else {
         Icons::unicode()
     };
-    for (key, target) in [
-        ("icons.working", &mut icons.working),
-        ("icons.waiting_for_user", &mut icons.waiting_for_user),
-        ("icons.succeeded", &mut icons.succeeded),
-        ("icons.failed", &mut icons.failed),
-        ("icons.stale", &mut icons.stale),
+    let mut invalid_keys = Vec::new();
+    for (key, diagnostic, target) in [
+        ("icons.working", "invalid_icons_working", &mut icons.working),
+        (
+            "icons.waiting_for_user",
+            "invalid_icons_waiting_for_user",
+            &mut icons.waiting_for_user,
+        ),
+        (
+            "icons.succeeded",
+            "invalid_icons_succeeded",
+            &mut icons.succeeded,
+        ),
+        ("icons.failed", "invalid_icons_failed", &mut icons.failed),
+        ("icons.stale", "invalid_icons_stale", &mut icons.stale),
     ] {
         if let Some(value) = values.get(key) {
-            target.clone_from(value);
+            if let Some(frames) = parse_icon_frames(value) {
+                *target = frames;
+            } else {
+                invalid_keys.push(diagnostic);
+            }
         }
     }
-    TitleConfig {
-        format: values
-            .get("title_format")
-            .cloned()
-            .unwrap_or_else(|| "{icon} {title}".to_owned()),
-        icons,
-        show_counts: parse_bool(values.get("show_counts"), false),
+    ParsedTitleConfig {
+        config: TitleConfig {
+            format: values
+                .get("title_format")
+                .cloned()
+                .unwrap_or_else(|| "{icon} {title}".to_owned()),
+            icons,
+            show_counts: parse_bool(values.get("show_counts"), false),
+        }
+        .with_safe_format(),
+        invalid_keys,
     }
-    .with_safe_format()
+}
+
+fn parse_icon_frames(value: &str) -> Option<IconFrames> {
+    if value.trim_start().starts_with('[') {
+        serde_json::from_str::<Vec<String>>(value)
+            .ok()
+            .and_then(IconFrames::new)
+    } else if value.is_empty() {
+        None
+    } else {
+        Some(IconFrames::single(value))
+    }
 }
 
 fn now_millis() -> u64 {
@@ -393,6 +461,7 @@ pub struct RuntimeConfig {
     pub enabled: bool,
     pub mapping_timeout_ms: u64,
     pub max_payload_bytes: usize,
+    pub animation_interval_ms: u64,
     pub debug: bool,
     pub needs_run_commands: bool,
 }
@@ -403,6 +472,7 @@ impl Default for RuntimeConfig {
             enabled: true,
             mapping_timeout_ms: 2_000,
             max_payload_bytes: MAX_PAYLOAD_BYTES,
+            animation_interval_ms: DEFAULT_ANIMATION_INTERVAL_MS,
             debug: false,
             needs_run_commands: true,
         }
@@ -427,6 +497,12 @@ impl RuntimeConfig {
             1,
             MAX_PAYLOAD_BYTES,
         );
+        config.animation_interval_ms = parse_number(
+            values.get("animation_interval_ms"),
+            config.animation_interval_ms,
+            100,
+            60_000,
+        );
         config.needs_run_commands = values.get("notification_backend").map(String::as_str)
             != Some("off")
             && values.get("notification_policy").map(String::as_str) != Some("off")
@@ -449,6 +525,15 @@ where
         .and_then(|value| value.parse().ok())
         .filter(|value| *value >= minimum && *value <= maximum)
         .unwrap_or(default)
+}
+
+fn parse_number_checked<T>(value: Option<&String>, minimum: T, maximum: T) -> Option<T>
+where
+    T: Copy + Ord + std::str::FromStr,
+{
+    value
+        .and_then(|value| value.parse().ok())
+        .filter(|value| *value >= minimum && *value <= maximum)
 }
 
 /// Minimal stable tab information retained from `TabUpdate`.
@@ -829,6 +914,84 @@ mod tests {
             "off".to_owned(),
         )]));
         assert!(!off.needs_run_commands);
+    }
+
+    #[test]
+    fn animation_interval_accepts_bounds_and_rejects_invalid_values() {
+        for (value, expected) in [("100", 100), ("60000", 60_000), ("250", 250)] {
+            let config = RuntimeConfig::from_zellij(&BTreeMap::from([(
+                "animation_interval_ms".to_owned(),
+                value.to_owned(),
+            )]));
+            assert_eq!(config.animation_interval_ms, expected);
+        }
+        for value in ["99", "60001", "-1", "fast", ""] {
+            let values = BTreeMap::from([("animation_interval_ms".to_owned(), value.to_owned())]);
+            assert_eq!(
+                RuntimeConfig::from_zellij(&values).animation_interval_ms,
+                DEFAULT_ANIMATION_INTERVAL_MS
+            );
+            assert!(
+                parse_number_checked::<u64>(values.get("animation_interval_ms"), 100, 60_000)
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn every_visible_icon_accepts_json_frames_and_scalar_overrides_stay_static() {
+        let values = BTreeMap::from([
+            ("icons.working".to_owned(), r#"["◐","◓"]"#.to_owned()),
+            (
+                "icons.waiting_for_user".to_owned(),
+                r#"["?","?!"]"#.to_owned(),
+            ),
+            ("icons.succeeded".to_owned(), r#"["ok"]"#.to_owned()),
+            ("icons.failed".to_owned(), "ERR".to_owned()),
+            ("icons.stale".to_owned(), r#"[".",".."]"#.to_owned()),
+        ]);
+        let parsed = title_config(&values);
+
+        assert!(parsed.invalid_keys.is_empty());
+        assert_eq!(parsed.config.icons.working.frame(0), "◐");
+        assert_eq!(parsed.config.icons.working.frame(1), "◓");
+        assert_eq!(parsed.config.icons.waiting_for_user.frame(1), "?!");
+        assert!(!parsed.config.icons.succeeded.is_animated());
+        assert_eq!(parsed.config.icons.failed.frame(0), "ERR");
+        assert!(!parsed.config.icons.failed.is_animated());
+        assert_eq!(parsed.config.icons.stale.frame(1), "..");
+    }
+
+    #[test]
+    fn invalid_icon_arrays_fall_back_per_state_with_sanitized_diagnostics() {
+        let cases = [
+            ("icons.working", "[", "invalid_icons_working", "●"),
+            (
+                "icons.waiting_for_user",
+                "[]",
+                "invalid_icons_waiting_for_user",
+                "?",
+            ),
+            ("icons.succeeded", r#"[""]"#, "invalid_icons_succeeded", "✓"),
+            ("icons.failed", r#"["x",1]"#, "invalid_icons_failed", "×"),
+            ("icons.stale", "", "invalid_icons_stale", "!"),
+        ];
+        for (key, value, diagnostic, fallback) in cases {
+            let parsed = title_config(&BTreeMap::from([(key.to_owned(), value.to_owned())]));
+            assert_eq!(parsed.invalid_keys, [diagnostic]);
+            let state = match key {
+                "icons.working" => zag_lens_protocol::CanonicalState::Working,
+                "icons.waiting_for_user" => zag_lens_protocol::CanonicalState::WaitingForUser,
+                "icons.succeeded" => zag_lens_protocol::CanonicalState::Succeeded,
+                "icons.failed" => zag_lens_protocol::CanonicalState::Failed,
+                "icons.stale" => zag_lens_protocol::CanonicalState::Stale,
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                parsed.config.icons.for_state(state).unwrap().frame(0),
+                fallback
+            );
+        }
     }
 
     #[test]
