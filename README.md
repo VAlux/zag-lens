@@ -78,6 +78,11 @@ Zellij and any running OpenCode TUI afterward to load the updated plugins.
 
 ## Tab Statuses
 
+Zag Lens respects the user's existing Zellij tab bar. It does not install,
+replace, or render a tab-bar plugin; it only decorates the affected tab's title.
+The original title remains the base title, user renames are preserved, and the
+base title is restored when no visible agent status remains.
+
 By default, Zag Lens prefixes the tab's existing title with the highest-priority
 visible agent status:
 
@@ -92,6 +97,51 @@ visible agent status:
 
 Icons and the title format are configurable; see
 [configuration](docs/configuration.md).
+
+## Plugin Configuration
+
+The installer creates a `zag-lens` alias in the resolved Zellij `config.kdl`.
+Customize the plugin by adding or changing child settings on that alias while
+keeping the installer-generated absolute `location` and `host_binary` paths:
+
+```kdl
+plugins {
+    zag-lens location="file:/absolute/path/to/zag-lens.wasm" {
+        host_binary "/absolute/path/to/zag-lens"
+        title_format "{icon} {title}"
+        icon_set "unicode"
+        show_counts "false"
+        success_ttl_seconds "30"
+        stale_after_seconds "1800"
+        notification_policy "waiting-and-complete"
+        notification_focus "inactive-tab"
+        notification_backend "auto"
+    }
+}
+```
+
+Common settings are:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `enabled` | `true` | Enables lifecycle-event processing and title updates. |
+| `title_format` | `{icon} {title}` | Controls the decorated tab-title format. |
+| `icon_set` | `unicode` | Selects `unicode` or `ascii` built-in icons. |
+| `show_counts` | `false` | Shows a count when several agents share the winning state. |
+| `success_ttl_seconds` | `30` | Controls how long successful completion remains visible. |
+| `stale_after_seconds` | `1800` | Marks non-terminal activity stale after this interval. |
+| `notification_policy` | `waiting-only` | Controls waiting and completion notifications. |
+| `notification_focus` | `inactive-tab` | Selects `inactive-tab`, `always`, or `never`. |
+| `notification_backend` | `auto` | Selects `auto`, `applescript`, `command`, `bell`, or `off`. |
+
+On macOS, `notification_backend "auto"` uses the built-in AppleScript backend
+and needs no custom command configuration. Invalid settings fall back safely and
+do not disable title updates. Restart Zellij after changing plugin settings.
+
+The OpenCode integration has no separate Zag Lens settings. Its global plugin
+forwards sanitized lifecycle events into the same Zellij plugin configuration.
+See [configuration](docs/configuration.md) for every setting, custom icons,
+command-backend arguments, bounds, privacy behavior, and permissions.
 
 ## Source-build Prerequisites
 
