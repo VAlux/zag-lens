@@ -16,7 +16,9 @@ pub const MAX_BODY_CHARS: usize = 512;
 
 #[cfg(target_os = "linux")]
 const APP_NAME: &str = "Zag Lens";
+#[cfg(any(target_os = "macos", test))]
 const APPLESCRIPT_PROGRAM: &str = "/usr/bin/osascript";
+#[cfg(any(target_os = "macos", test))]
 const APPLESCRIPT_SOURCE: &str = r"on run argv
     display notification (item 2 of argv) with title (item 1 of argv)
 end run";
@@ -425,6 +427,7 @@ fn show_desktop_notification(_notification: &Notification) -> Result<(), Notific
     Err(NotificationError::UnsupportedPlatform)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn applescript_command(notification: &Notification) -> Command {
     let mut command = Command::new(APPLESCRIPT_PROGRAM);
     command
