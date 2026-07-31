@@ -279,6 +279,10 @@ impl Reducer {
             };
             let elapsed = now.saturating_sub(previous.occurred_at_unix_nanos);
 
+            // Removal is checked before stale promotion: `is_expiring_inactive` is a
+            // superset of `is_stale_candidate`, and `stale_expiry >= stale_after`
+            // always, so an agent already past total expiry is removed outright
+            // instead of being promoted to `Stale` and only cleaned up a tick later.
             if previous.state == CanonicalState::Succeeded && elapsed >= success_ttl {
                 transitions.extend(self.remove(&identity, TransitionCause::SuccessTtlExpired));
             } else if is_expiring_inactive(previous.state) && elapsed >= stale_expiry {
@@ -1081,6 +1085,30 @@ mod tests {
         );
 
         let transitions = reducer.advance_time(at("2026-07-13T12:00:10Z"));
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].cause, TransitionCause::StaleTtlExpired);
+        assert_eq!(
+            transitions[0].previous.as_ref().unwrap().state,
+            CanonicalState::Working
+        );
+        assert!(transitions[0].current.is_none());
+        assert!(reducer.is_empty());
+    }
+
+    #[test]
+    fn far_past_event_removes_instance_without_showing_stale() {
+        let mut reducer = Reducer::new(ReducerConfig {
+            stale_after: Duration::from_secs(10),
+            stale_ttl: Duration::from_secs(5),
+            ..ReducerConfig::default()
+        });
+        applied(
+            reducer
+                .apply(&event(EventKind::TurnStarted, "2026-07-13T12:00:00Z"))
+                .unwrap(),
+        );
+
+        let transitions = reducer.advance_time(at("2026-07-13T12:05:00Z"));
         assert_eq!(transitions.len(), 1);
         assert_eq!(transitions[0].cause, TransitionCause::StaleTtlExpired);
         assert_eq!(
