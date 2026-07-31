@@ -14,6 +14,7 @@ plugins {
         icon_set "unicode"
         icons.working "[\"◐\",\"◓\",\"◑\",\"◒\"]"
         animation_interval_ms "250"
+        stale_after_seconds "1800"
         stale_ttl_seconds "300"
         success_ttl_seconds "30"
     }
@@ -35,7 +36,7 @@ the plugin invokes `zag-lens` through the environment inherited by Zellij.
 | `show_counts` | `false` | Adds a count when multiple agents contribute the winning state. |
 | `success_ttl_seconds` | `30` | `0` through `86400`. |
 | `stale_after_seconds` | `1800` | `1` through `604800`. |
-| `stale_ttl_seconds` | `300` | `0` through `604800`; `0` never displays `stale`. |
+| `stale_ttl_seconds` | `300` | `0` through `604800`, in addition to `stale_after_seconds`; `0` never displays `stale`. |
 | `mapping_timeout_ms` | `2000` | `1` through `60000`. |
 | `notification_policy` | `waiting-only` | `waiting-only`, `waiting-and-complete`, or `off`. |
 | `notification_focus` | `inactive-tab` | `inactive-tab`, `always`, or `never`. |
@@ -49,6 +50,10 @@ the plugin invokes `zag-lens` through the environment inherited by Zellij.
 
 Invalid values fall back to safe defaults. An invalid notification setting does
 not disable title updates.
+
+Setting `stale_ttl_seconds "604800"` effectively restores the previous
+indefinite behavior, where a stale status stays pinned until a new event
+arrives or the pane closes.
 
 ## Icon Animation
 

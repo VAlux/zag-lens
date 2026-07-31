@@ -82,4 +82,14 @@ open_status_tab "succeeded" "turn_completed" "succeeded" "${now}"
 open_status_tab "failed" "turn_failed" "failed" "${now}"
 
 # Stale is timer-derived rather than accepted directly by the event protocol.
-open_status_tab "stale" "turn_started" "working" "1970-01-01T00:00:00Z"
+# The reducer promotes to `stale` after `stale_after_seconds` (default 1800)
+# and removes the instance entirely after `stale_after_seconds +
+# stale_ttl_seconds` (default 2100). To fabricate a stale tab, the delivered
+# event's timestamp must land strictly inside that window — otherwise
+# `advance_time` sees the instance as already past total expiry on its first
+# tick and removes it outright, so it is never shown as `stale`. 1900 seconds
+# ago sits comfortably inside (1800, 2100) with the defaults.
+stale_epoch=$(($(date +%s) - 1900))
+stale_at="$(date -u -r "${stale_epoch}" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+    || date -u -d "@${stale_epoch}" '+%Y-%m-%dT%H:%M:%SZ')"
+open_status_tab "stale" "turn_started" "working" "${stale_at}"
