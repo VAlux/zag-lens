@@ -374,6 +374,12 @@ fn reducer_config(values: &BTreeMap<String, String>) -> ReducerConfig {
             1,
             604_800,
         )),
+        stale_ttl: Duration::from_secs(parse_number(
+            values.get("stale_ttl_seconds"),
+            defaults.stale_ttl.as_secs(),
+            0,
+            604_800,
+        )),
         ..defaults
     }
 }
@@ -1107,5 +1113,28 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn stale_ttl_setting_parses_and_falls_back_when_out_of_range() {
+        let default = ReducerConfig::default().stale_ttl;
+        assert_eq!(default, Duration::from_secs(300));
+        assert_eq!(reducer_config(&BTreeMap::new()).stale_ttl, default);
+
+        let mut values = BTreeMap::new();
+        values.insert("stale_ttl_seconds".to_owned(), "0".to_owned());
+        assert_eq!(reducer_config(&values).stale_ttl, Duration::ZERO);
+
+        values.insert("stale_ttl_seconds".to_owned(), "604800".to_owned());
+        assert_eq!(
+            reducer_config(&values).stale_ttl,
+            Duration::from_secs(604_800)
+        );
+
+        values.insert("stale_ttl_seconds".to_owned(), "604801".to_owned());
+        assert_eq!(reducer_config(&values).stale_ttl, default);
+
+        values.insert("stale_ttl_seconds".to_owned(), "soon".to_owned());
+        assert_eq!(reducer_config(&values).stale_ttl, default);
     }
 }

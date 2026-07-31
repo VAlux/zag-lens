@@ -114,6 +114,7 @@ plugins {
         show_counts "false"
         success_ttl_seconds "30"
         stale_after_seconds "1800"
+        stale_ttl_seconds "300"
         notification_policy "waiting-and-complete"
         notification_focus "inactive-tab"
         notification_backend "auto"
@@ -133,6 +134,7 @@ Common settings are:
 | `show_counts`           | `false`          | Shows a count when several agents share the winning state.  |
 | `success_ttl_seconds`   | `30`             | Controls how long successful completion remains visible.    |
 | `stale_after_seconds`   | `1800`           | Marks non-terminal activity stale after this interval.      |
+| `stale_ttl_seconds`     | `300`            | Removes a stale status this long after it appears.          |
 | `notification_policy`   | `waiting-only`   | Controls waiting and completion notifications.              |
 | `notification_focus`    | `inactive-tab`   | Selects `inactive-tab`, `always`, or `never`.               |
 | `notification_backend`  | `auto`           | Selects `auto`, `applescript`, `command`, `bell`, or `off`. |

@@ -548,6 +548,7 @@ an implementation detail, but these logical settings are required:
 | `show_counts` | `false` | Show same-state agent count. |
 | `success_ttl_seconds` | `30` | Duration of success decoration. |
 | `stale_after_seconds` | `1800` | Inactivity before a non-terminal state is stale. |
+| `stale_ttl_seconds` | `300` | Additional time a stale state is shown before removal. |
 | `mapping_timeout_ms` | `2000` | Time to wait for pane-to-tab mapping. |
 | `notification_policy` | `waiting-only` | Which transitions notify. |
 | `notification_focus` | `inactive-tab` | Active-tab suppression policy. |
