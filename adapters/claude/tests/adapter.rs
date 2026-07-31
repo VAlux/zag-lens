@@ -9,6 +9,8 @@ const SESSION_START: &str =
 const USER_PROMPT_SUBMIT: &str =
     include_str!("../../../tests/fixtures/claude/2.1.207/user-prompt-submit.json");
 const PRE_TOOL_USE: &str = include_str!("../../../tests/fixtures/claude/2.1.207/pre-tool-use.json");
+const PRE_TOOL_USE_ASK_USER_QUESTION: &str =
+    include_str!("../../../tests/fixtures/claude/2.1.207/pre-tool-use-ask-user-question.json");
 const POST_TOOL_USE: &str =
     include_str!("../../../tests/fixtures/claude/2.1.207/post-tool-use.json");
 const POST_TOOL_USE_FAILURE: &str =
@@ -239,6 +241,7 @@ fn sensitive_native_fields_are_not_transported() {
     for (native_event, fixture) in [
         ("UserPromptSubmit", USER_PROMPT_SUBMIT),
         ("PreToolUse", PRE_TOOL_USE),
+        ("PreToolUse", PRE_TOOL_USE_ASK_USER_QUESTION),
         ("PostToolUse", POST_TOOL_USE),
         ("PostToolUseFailure", POST_TOOL_USE_FAILURE),
         ("PermissionRequest", PERMISSION_REQUEST),
@@ -319,4 +322,59 @@ fn malformed_payloads_return_sanitized_errors() {
         assert!(!error.message().contains("REDACTED"));
         assert!(!error.message().contains("session-8"));
     }
+}
+
+#[test]
+fn blocking_prompt_tools_wait_for_the_user() {
+    for tool_name in ["AskUserQuestion", "ExitPlanMode"] {
+        let mut input = native("PreToolUse", PRE_TOOL_USE_ASK_USER_QUESTION);
+        input.payload["tool_name"] = Value::String(tool_name.to_owned());
+
+        let decision = ClaudeAdapter
+            .normalize(&input, &context())
+            .expect("blocking prompt tool must normalize");
+        let AdapterDecision::Emit(event) = decision else {
+            panic!("blocking prompt tool must emit");
+        };
+
+        assert_eq!(event.kind, EventKind::InteractionRequired, "{tool_name}");
+        assert_eq!(event.state, CanonicalState::WaitingForUser, "{tool_name}");
+        let attention = event
+            .attention
+            .expect("blocking prompt must carry attention");
+        assert_eq!(attention.kind, "question", "{tool_name}");
+        assert_eq!(
+            attention.summary.as_deref(),
+            Some("Claude Code requires an answer"),
+            "{tool_name}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_tools_carry_no_attention() {
+    // `lifecycle_fixtures_map_to_expected_states` already pins this fixture
+    // (tool_name `Bash`) to activity/working. This adds only the half of the
+    // contract that test does not assert.
+    assert!(emitted("PreToolUse", PRE_TOOL_USE).attention.is_none());
+}
+
+#[test]
+fn absent_tool_name_stays_activity() {
+    let mut input = native("PreToolUse", PRE_TOOL_USE_ASK_USER_QUESTION);
+    input
+        .payload
+        .as_object_mut()
+        .expect("fixture is a JSON object")
+        .remove("tool_name");
+
+    let decision = ClaudeAdapter
+        .normalize(&input, &context())
+        .expect("a PreToolUse without tool_name must stay fail-open");
+    let AdapterDecision::Emit(event) = decision else {
+        panic!("supported event must emit");
+    };
+
+    assert_eq!(event.kind, EventKind::Activity);
+    assert_eq!(event.state, CanonicalState::Working);
 }

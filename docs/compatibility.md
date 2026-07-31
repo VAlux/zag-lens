@@ -29,7 +29,10 @@ Claude setup registers `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Notification`,
 `Stop`, `StopFailure`, and `SessionEnd`. Supported notification subtypes are
 `permission_prompt`, `idle_prompt`, and `elicitation_dialog`; other subtypes are
-ignored.
+ignored. `PreToolUse` for the blocking prompt tools `AskUserQuestion` and
+`ExitPlanMode` reports `waiting_for_user`; the tool name is the only payload
+field consulted, and `PostToolUse` returns the tab to `working` once the
+user answers.
 
 OpenCode setup installs a global, auto-loaded local plugin. It observes
 `session.created`, `session.status`, `permission.*`, `question.*`, completed

@@ -403,7 +403,8 @@ The Claude Code integration uses command hooks. The initial mapping is:
 | --- | --- | --- | --- |
 | `SessionStart` | any | `session_started` | `ready` |
 | `UserPromptSubmit` | any | `turn_started` | `working` |
-| `PreToolUse` | any | `activity` | `working` |
+| `PreToolUse` | `AskUserQuestion`, `ExitPlanMode` | `interaction_required` | `waiting_for_user` |
+| `PreToolUse` | any other tool | `activity` | `working` |
 | `PostToolUse` | any | `activity` | `working` |
 | `PostToolUseFailure` | any | `activity` | `working` |
 | `PermissionRequest` | any | `interaction_required` | `waiting_for_user` |
