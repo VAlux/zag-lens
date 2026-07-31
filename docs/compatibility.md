@@ -30,7 +30,7 @@ Claude setup registers `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 `Stop`, `StopFailure`, and `SessionEnd`. Supported notification subtypes are
 `permission_prompt`, `idle_prompt`, and `elicitation_dialog`; other subtypes are
 ignored. `PreToolUse` for the blocking prompt tools `AskUserQuestion` and
-`ExitPlanMode` reports `waiting_for_user`; the tool name is the only payload
+`ExitPlanMode` reports `waiting_for_user`; the tool name is the only tool
 field consulted, and `PostToolUse` returns the tab to `working` once the
 user answers.
 

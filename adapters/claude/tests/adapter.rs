@@ -313,6 +313,14 @@ fn malformed_payloads_return_sanitized_errors() {
               "notification_type":7
             }"#,
         ),
+        native(
+            "PreToolUse",
+            r#"{
+              "hook_event_name":"PreToolUse",
+              "session_id":"session-8",
+              "tool_name":7
+            }"#,
+        ),
     ];
 
     for input in cases {
@@ -371,6 +379,28 @@ fn absent_tool_name_stays_activity() {
     let decision = ClaudeAdapter
         .normalize(&input, &context())
         .expect("a PreToolUse without tool_name must stay fail-open");
+    let AdapterDecision::Emit(event) = decision else {
+        panic!("supported event must emit");
+    };
+
+    assert_eq!(event.kind, EventKind::Activity);
+    assert_eq!(event.state, CanonicalState::Working);
+}
+
+#[test]
+fn post_tool_use_never_inspects_tool_name() {
+    // The `post-tool-use.json` fixture's own `tool_name` is `Write`, so an
+    // implementation that wrongly inspected `tool_name` on `PostToolUse`
+    // would still pass every other test in this suite undetected. Override
+    // it to `AskUserQuestion` — the exact tool that must return the tab from
+    // `?` to `working` once the user answers — to prove this arm ignores
+    // `tool_name` entirely.
+    let mut input = native("PostToolUse", POST_TOOL_USE);
+    input.payload["tool_name"] = Value::String("AskUserQuestion".to_owned());
+
+    let decision = ClaudeAdapter
+        .normalize(&input, &context())
+        .expect("PostToolUse must normalize regardless of tool_name");
     let AdapterDecision::Emit(event) = decision else {
         panic!("supported event must emit");
     };
