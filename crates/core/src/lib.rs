@@ -13,6 +13,7 @@ use zag_lens_protocol::{AgentIdentity, Attention, CanonicalState, EventKind, Nor
 
 const DEFAULT_SUCCESS_TTL_SECONDS: u64 = 30;
 const DEFAULT_STALE_AFTER_SECONDS: u64 = 1_800;
+const DEFAULT_STALE_TTL_SECONDS: u64 = 300;
 const DEFAULT_MAX_AGENTS: usize = 1_024;
 const DEFAULT_DEDUPLICATION_CAPACITY: usize = 4_096;
 const DEFAULT_IDENTITY_CURSOR_CAPACITY: usize = 2_048;
@@ -24,6 +25,7 @@ pub struct ReducerConfig {
     pub enabled: bool,
     pub success_ttl: Duration,
     pub stale_after: Duration,
+    pub stale_ttl: Duration,
     pub max_agents: usize,
     pub deduplication_capacity: usize,
     pub identity_cursor_capacity: usize,
@@ -35,6 +37,7 @@ impl Default for ReducerConfig {
             enabled: true,
             success_ttl: Duration::from_secs(DEFAULT_SUCCESS_TTL_SECONDS),
             stale_after: Duration::from_secs(DEFAULT_STALE_AFTER_SECONDS),
+            stale_ttl: Duration::from_secs(DEFAULT_STALE_TTL_SECONDS),
             max_agents: DEFAULT_MAX_AGENTS,
             deduplication_capacity: DEFAULT_DEDUPLICATION_CAPACITY,
             identity_cursor_capacity: DEFAULT_IDENTITY_CURSOR_CAPACITY,
@@ -75,6 +78,7 @@ pub enum TransitionCause {
     Event(EventKind),
     InactivityTimeout,
     SuccessTtlExpired,
+    StaleTtlExpired,
     PaneClosed,
     CapacityEviction,
     ExplicitClear,
@@ -255,7 +259,7 @@ impl Reducer {
         })
     }
 
-    /// Applies success expiry and inactivity thresholds at an explicit time.
+    /// Applies success expiry, inactivity, and stale expiry at an explicit time.
     pub fn advance_time(&mut self, now: OffsetDateTime) -> Vec<Transition> {
         if !self.config.enabled {
             return Vec::new();
@@ -264,6 +268,7 @@ impl Reducer {
         let now = now.unix_timestamp_nanos();
         let success_ttl = duration_nanos(self.config.success_ttl);
         let stale_after = duration_nanos(self.config.stale_after);
+        let stale_expiry = stale_after.saturating_add(duration_nanos(self.config.stale_ttl));
         let mut identities: Vec<_> = self.agents.keys().cloned().collect();
         identities.sort_by(compare_identity);
         let mut transitions = Vec::new();
@@ -275,13 +280,9 @@ impl Reducer {
             let elapsed = now.saturating_sub(previous.occurred_at_unix_nanos);
 
             if previous.state == CanonicalState::Succeeded && elapsed >= success_ttl {
-                self.agents.remove(&identity);
-                remove_from_order(&mut self.agent_order, &identity);
-                transitions.push(Transition {
-                    previous: Some(previous),
-                    current: None,
-                    cause: TransitionCause::SuccessTtlExpired,
-                });
+                transitions.extend(self.remove(&identity, TransitionCause::SuccessTtlExpired));
+            } else if is_expiring_inactive(previous.state) && elapsed >= stale_expiry {
+                transitions.extend(self.remove(&identity, TransitionCause::StaleTtlExpired));
             } else if is_stale_candidate(previous.state) && elapsed >= stale_after {
                 let mut current = previous.clone();
                 current.state = CanonicalState::Stale;
@@ -425,6 +426,10 @@ const fn is_stale_candidate(state: CanonicalState) -> bool {
         state,
         CanonicalState::Ready | CanonicalState::Working | CanonicalState::WaitingForUser
     )
+}
+
+const fn is_expiring_inactive(state: CanonicalState) -> bool {
+    is_stale_candidate(state) || matches!(state, CanonicalState::Stale)
 }
 
 fn duration_nanos(duration: Duration) -> i128 {
@@ -1030,6 +1035,88 @@ mod tests {
             CanonicalState::Stale
         );
         assert!(reducer.advance_time(at("2026-07-13T12:00:11Z")).is_empty());
+    }
+
+    #[test]
+    fn stale_state_expires_after_stale_ttl() {
+        let mut reducer = Reducer::new(ReducerConfig {
+            stale_after: Duration::from_secs(10),
+            stale_ttl: Duration::from_secs(5),
+            ..ReducerConfig::default()
+        });
+        applied(
+            reducer
+                .apply(&event(EventKind::TurnStarted, "2026-07-13T12:00:00Z"))
+                .unwrap(),
+        );
+
+        let stale = reducer.advance_time(at("2026-07-13T12:00:10Z"));
+        assert_eq!(stale[0].cause, TransitionCause::InactivityTimeout);
+        assert_eq!(
+            stale[0].current.as_ref().unwrap().state,
+            CanonicalState::Stale
+        );
+
+        assert!(reducer.advance_time(at("2026-07-13T12:00:14Z")).is_empty());
+
+        let expired = reducer.advance_time(at("2026-07-13T12:00:15Z"));
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].cause, TransitionCause::StaleTtlExpired);
+        assert!(expired[0].current.is_none());
+        assert!(reducer.is_empty());
+        assert_eq!(reducer.aggregate_for_panes(["pane-1"]), None);
+    }
+
+    #[test]
+    fn zero_stale_ttl_removes_instance_without_showing_stale() {
+        let mut reducer = Reducer::new(ReducerConfig {
+            stale_after: Duration::from_secs(10),
+            stale_ttl: Duration::ZERO,
+            ..ReducerConfig::default()
+        });
+        applied(
+            reducer
+                .apply(&event(EventKind::TurnStarted, "2026-07-13T12:00:00Z"))
+                .unwrap(),
+        );
+
+        let transitions = reducer.advance_time(at("2026-07-13T12:00:10Z"));
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].cause, TransitionCause::StaleTtlExpired);
+        assert_eq!(
+            transitions[0].previous.as_ref().unwrap().state,
+            CanonicalState::Working
+        );
+        assert!(transitions[0].current.is_none());
+        assert!(reducer.is_empty());
+    }
+
+    #[test]
+    fn event_during_stale_window_resets_expiry() {
+        let mut reducer = Reducer::new(ReducerConfig {
+            stale_after: Duration::from_secs(10),
+            stale_ttl: Duration::from_secs(5),
+            ..ReducerConfig::default()
+        });
+        applied(
+            reducer
+                .apply(&event(EventKind::TurnStarted, "2026-07-13T12:00:00Z"))
+                .unwrap(),
+        );
+        reducer.advance_time(at("2026-07-13T12:00:10Z"));
+
+        applied(
+            reducer
+                .apply(&event(EventKind::Activity, "2026-07-13T12:00:12Z"))
+                .unwrap(),
+        );
+        assert_eq!(
+            reducer.agents().next().map(|snapshot| snapshot.state),
+            Some(CanonicalState::Working)
+        );
+
+        assert!(reducer.advance_time(at("2026-07-13T12:00:15Z")).is_empty());
+        assert_eq!(reducer.len(), 1);
     }
 
     #[test]

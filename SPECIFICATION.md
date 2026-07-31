@@ -357,7 +357,10 @@ lifecycle precedence to prevent an older activity event from overwriting a
 newer interaction or completion event.
 
 The plugin SHOULD mark a non-terminal state `stale` after a configurable
-inactivity interval. Closing the owning pane clears the state immediately.
+inactivity interval, and SHOULD then remove the instance after a second
+configurable interval so the tab title is restored without user action. Both
+intervals are measured from the instance's last lifecycle event. Closing the
+owning pane clears the state immediately.
 
 ## 9. Harness adapters
 
