@@ -3,6 +3,8 @@
 //! Only stable lifecycle identifiers and coarse notification classifications
 //! are projected. Prompt text, transcript paths, tool inputs, tool results,
 //! error details, and assistant messages are deliberately never inspected.
+//! The one exception is `tool_name` on `PreToolUse`, read only to recognize
+//! the blocking prompt tools `AskUserQuestion` and `ExitPlanMode`.
 
 use serde_json::{Map, Value};
 use zag_lens_protocol::{
@@ -89,7 +91,14 @@ fn classify(event: &NativeHookEvent) -> Result<Option<Classification>, AdapterEr
     let (kind, attention) = match event.native_event.as_str() {
         "SessionStart" => (EventKind::SessionStarted, None),
         "UserPromptSubmit" => (EventKind::TurnStarted, None),
-        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => (EventKind::Activity, None),
+        "PreToolUse" => {
+            if is_blocking_prompt_tool(object_payload(&event.payload)?)? {
+                (EventKind::InteractionRequired, Some(question_attention()))
+            } else {
+                (EventKind::Activity, None)
+            }
+        }
+        "PostToolUse" | "PostToolUseFailure" => (EventKind::Activity, None),
         "PermissionRequest" => (EventKind::InteractionRequired, Some(permission_attention())),
         "Notification" => {
             let payload = object_payload(&event.payload)?;
@@ -116,6 +125,26 @@ fn permission_attention() -> Attention {
     Attention {
         kind: "permission".to_owned(),
         summary: Some("Claude Code requires permission".to_owned()),
+    }
+}
+
+/// Tools that block the turn on a user response. `PreToolUse` is the only
+/// lifecycle signal Claude Code emits for them, so the stable tool name —
+/// never the tool input — selects the waiting state.
+fn is_blocking_prompt_tool(payload: &Map<String, Value>) -> Result<bool, AdapterError> {
+    let Some(tool_name) = optional_identifier(payload, "tool_name")? else {
+        return Ok(false);
+    };
+    Ok(matches!(
+        tool_name.as_str(),
+        "AskUserQuestion" | "ExitPlanMode"
+    ))
+}
+
+fn question_attention() -> Attention {
+    Attention {
+        kind: "question".to_owned(),
+        summary: Some("Claude Code requires an answer".to_owned()),
     }
 }
 
