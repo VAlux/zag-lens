@@ -198,21 +198,9 @@ Then replace the `if`/`else if` chain inside the loop (lines 277-295) with:
 
 ```rust
             if previous.state == CanonicalState::Succeeded && elapsed >= success_ttl {
-                self.agents.remove(&identity);
-                remove_from_order(&mut self.agent_order, &identity);
-                transitions.push(Transition {
-                    previous: Some(previous),
-                    current: None,
-                    cause: TransitionCause::SuccessTtlExpired,
-                });
+                transitions.extend(self.remove(&identity, TransitionCause::SuccessTtlExpired));
             } else if is_expiring_inactive(previous.state) && elapsed >= stale_expiry {
-                self.agents.remove(&identity);
-                remove_from_order(&mut self.agent_order, &identity);
-                transitions.push(Transition {
-                    previous: Some(previous),
-                    current: None,
-                    cause: TransitionCause::StaleTtlExpired,
-                });
+                transitions.extend(self.remove(&identity, TransitionCause::StaleTtlExpired));
             } else if is_stale_candidate(previous.state) && elapsed >= stale_after {
                 let mut current = previous.clone();
                 current.state = CanonicalState::Stale;
@@ -227,6 +215,8 @@ Then replace the `if`/`else if` chain inside the loop (lines 277-295) with:
 ```
 
 Branch order matters: the new removal is checked before the stale promotion so that an agent already past total expiry is dropped outright instead of first being promoted to `Stale` and only cleaned up on some later tick.
+
+Both removal branches delegate to the existing private `Reducer::remove(&mut self, identity: &AgentIdentity, cause: TransitionCause) -> Option<Transition>` helper at line 335, which already performs the `agents.remove` + `remove_from_order` + `Transition { current: None }` sequence. This also replaces the inline body the success branch used before, so the sequence exists in exactly one place. `transitions.extend(..)` consumes the `Option` directly — `Option<Transition>` is an `IntoIterator`, so no `if let` is needed. The `previous` local is still required by the branch conditions that read `previous.state`.
 
 Add the predicate next to `is_stale_candidate` (after line 428):
 
